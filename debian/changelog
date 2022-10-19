@@ -1,0 +1,182 @@
+seaborn (0.11.2-2) unstable; urgency=medium
+
+  * d/control: Remove useless B-D on python3-nose
+  * Bump Standards-Version to 4.6.0 (no changes needed)
+
+ -- Nilesh Patra <nilesh@debian.org>  Mon, 25 Oct 2021 01:37:52 +0530
+
+seaborn (0.11.2-1) unstable; urgency=medium
+
+  * Refresh patches
+  * d/watch: Fix watch regex
+  * New upstream version 0.11.2
+
+ -- Nilesh Patra <nilesh@debian.org>  Wed, 25 Aug 2021 17:38:32 +0530
+
+seaborn (0.11.1-1) unstable; urgency=medium
+
+  * New upstream version 0.11.1
+    (Closes: #980688)
+  * Refresh patches
+  * Add myself to uploaders
+  * Declare compliance with policy 4.5.1
+  * Bump debhelper-compat version to 13
+  * Import warnings in test_axisgrid.py
+
+ -- Nilesh Patra <npatra974@gmail.com>  Thu, 21 Jan 2021 17:21:52 +0530
+
+seaborn (0.10.1-2) unstable; urgency=medium
+
+  * Team Upload.
+  * Refresh patch
+  * Fix square aspect test (Closes: #966991)
+
+ -- Nilesh Patra <npatra974@gmail.com>  Tue, 11 Aug 2020 00:12:12 +0530
+
+seaborn (0.10.1-1) unstable; urgency=medium
+
+  * Team upload.
+  * New upstream version
+    Closes: #959366
+  * Add salsa-ci file (routine-update)
+
+ -- Andreas Tille <tille@debian.org>  Sat, 02 May 2020 10:00:57 +0200
+
+seaborn (0.10.0-1) unstable; urgency=medium
+
+  * Team Upload.
+  * New upstream version 0.10.0
+    Closes: #950695, #950928, #897263
+  * Add "Rules-Requires-Root:no"
+  * Add upstream/metadata
+  * Drop compat, switch to debhelper-compat
+  * Remove un-needed patch
+  * Modify patch wrt new version
+  * Bump standards version to 4.5.0
+  * Fix copyright
+
+ -- Nilesh Patra <npatra974@gmail.com>  Wed, 26 Feb 2020 09:41:20 +0000
+
+seaborn (0.9.0-2) unstable; urgency=medium
+
+  * Team upload.
+  * Drop Python 2 support (Closes: #938458).
+
+ -- Ondřej Nový <onovy@debian.org>  Thu, 24 Oct 2019 14:07:01 +0200
+
+seaborn (0.9.0-1) unstable; urgency=medium
+
+  * Team upload.
+  * New upstream version
+  * debhelper 12
+  * Point Vcs fields to salsa.debian.org
+  * Standards-Version: 4.3.0
+  * Testsuite: autopkgtest-pkg-python
+  * Drop duplicated override_dh_auto_test
+  * Secure URI in copyright format
+  * Respect DEB_BUILD_OPTIONS in override_dh_auto_test target
+  * Drop ancient X-Python-Version field
+  * Do not force nosetest (and thus enable autodetection of pytest)
+  * Dirty hack enabling the test suite to pass also in Python3 where
+    a single test has different results than in Python2
+  * Secure URI in watch file
+
+ -- Andreas Tille <tille@debian.org>  Wed, 23 Jan 2019 08:16:03 +0100
+
+seaborn (0.8.0-1.1) unstable; urgency=medium
+
+  * Non-maintainer upload.
+  * Backport upstream FTBFS fixes. (Closes: #896003)
+  * python-seaborn: Add the missing dependency on python-tk.
+    (Closes: #896285)
+  * python3-seaborn: Add the missing dependency on python3-tk.
+    (Closes: #896401)
+
+ -- Adrian Bunk <bunk@debian.org>  Sun, 23 Sep 2018 09:31:01 +0300
+
+seaborn (0.8.0-1) unstable; urgency=medium
+
+  * Team upload.
+  * New upstream version (dropped patches)
+  * Add python*-pytest to Build-Depends
+    Closes: #868616
+  * cme fix dpkg-control
+  * debhelper 10
+  * Make short description distinct
+
+ -- Andreas Tille <tille@debian.org>  Mon, 24 Jul 2017 12:10:14 +0200
+
+seaborn (0.7.1-2) unstable; urgency=medium
+
+  [ Andreas Tille ]
+  * Team upload.
+  * Move to Debian Science maintenance
+  * Add python-bs4 to Recommends since its usage in test suite makes the
+    installation recommended
+
+  [ Ole Streicher ]
+  * Loose too tight test. Closes: #850999, #849368
+  * Allow matplotlib to return an rgba tuple instead of a color name in
+    test. Closes: #849368
+
+ -- Ole Streicher <olebole@debian.org>  Mon, 23 Jan 2017 12:24:19 +0100
+
+seaborn (0.7.1-1) unstable; urgency=medium
+
+  * Fresh upstream release
+  * debian/rules
+    - set mpl backed to Agg to robustify testing and resolving FTBFS
+      (Closes: #802412)
+
+ -- Yaroslav Halchenko <debian@onerussian.com>  Sat, 10 Sep 2016 15:03:38 -0400
+
+seaborn (0.6.0-1) unstable; urgency=medium
+
+  * Fresh upstream release
+  * debian/rules
+    - fake http*_proxy to prevent online interactions at build time
+    - disabled testing doctests since they heavily rely on online datasets
+
+ -- Yaroslav Halchenko <debian@onerussian.com>  Mon, 29 Jun 2015 13:13:55 -0400
+
+seaborn (0.5.1-1) experimental; urgency=medium
+
+  * New upstream release (Closes: #774809)
+
+ -- Yaroslav Halchenko <debian@onerussian.com>  Mon, 26 Jan 2015 11:37:46 -0500
+
+seaborn (0.4.0-2) unstable; urgency=medium
+
+  * debian/control
+    - swap order of bdepends for matplotlib to make buildds happy again
+      (Closes: #765147)
+  * debian/patches
+    - up_3d9f355d8a424a984dd6f2de9719658cb1e9f715
+      picked up from upstream to resolve failed unittest while verifying
+      rc options
+
+ -- Yaroslav Halchenko <debian@onerussian.com>  Sun, 09 Nov 2014 20:46:25 -0500
+
+seaborn (0.4.0-1) unstable; urgency=medium
+
+  * Fresh upstream release
+  * debian/control
+    - building for Python >= 2.7 since pandas is N/A for python 2.6 on wheezy
+
+ -- Yaroslav Halchenko <debian@onerussian.com>  Thu, 04 Sep 2014 09:39:01 -0400
+
+seaborn (0.3.1-1) unstable; urgency=medium
+
+  * New upstream release
+    - absorbed all previously included patches
+  * debian/rules
+    - customize tests invocation for compatibility with nose on wheezy
+      (can't be invoked via python -m nose)
+
+ -- Yaroslav Halchenko <debian@onerussian.com>  Mon, 21 Apr 2014 20:56:40 -0400
+
+seaborn (0.3.0-1) unstable; urgency=low
+
+  * Initial Debian packaging (Closes: #742573)
+
+ -- Yaroslav Halchenko <debian@onerussian.com>  Mon, 24 Mar 2014 23:52:37 -0400
