@@ -144,7 +144,7 @@ class TestPlotData:
             PlotData(long_df, {"x": "x", "y": vector})
 
     @pytest.mark.parametrize(
-        "arg", [[], np.array([]), pd.DataFrame()],
+        "arg", [{}, pd.DataFrame()],
     )
     def test_empty_data_input(self, arg):
 
@@ -187,8 +187,9 @@ class TestPlotData:
 
         p = PlotData(None, {"x": x, "y": y})
 
-        x_col_expected = pd.Series([10, 20, 30, np.nan, np.nan], np.arange(1, 6))
-        y_col_expected = pd.Series([np.nan, np.nan, 300, 400, 500], np.arange(1, 6))
+        idx_expected = [1, 2, 3, 4, 5]
+        x_col_expected = pd.Series([10, 20, 30, np.nan, np.nan], idx_expected)
+        y_col_expected = pd.Series([np.nan, np.nan, 300, 400, 500], idx_expected)
         assert_vector_equal(p.frame["x"], x_col_expected)
         assert_vector_equal(p.frame["y"], y_col_expected)
 
@@ -396,3 +397,43 @@ class TestPlotData:
         p = PlotData(d1, {"x": "a"}).join(d2, {"y": "a"}).join(None, {"y": "a"})
         assert_vector_equal(p.frame["x"], d1["a"])
         assert_vector_equal(p.frame["y"], d1["a"])
+
+    def test_bad_type(self, flat_list):
+
+        err = "Data source must be a DataFrame or Mapping"
+        with pytest.raises(TypeError, match=err):
+            PlotData(flat_list, {})
+
+    @pytest.mark.skipif(
+        condition=not hasattr(pd.api, "interchange"),
+        reason="Tests behavior assuming support for dataframe interchange"
+    )
+    def test_data_interchange(self, mock_long_df, long_df):
+
+        variables = {"x": "x", "y": "z", "color": "a"}
+        p = PlotData(mock_long_df, variables)
+        for var, col in variables.items():
+            assert_vector_equal(p.frame[var], long_df[col])
+
+        p = PlotData(mock_long_df, {**variables, "color": long_df["a"]})
+        for var, col in variables.items():
+            assert_vector_equal(p.frame[var], long_df[col])
+
+    @pytest.mark.skipif(
+        condition=not hasattr(pd.api, "interchange"),
+        reason="Tests behavior assuming support for dataframe interchange"
+    )
+    def test_data_interchange_failure(self, mock_long_df):
+
+        mock_long_df._data = None  # Break __dataframe__()
+        with pytest.raises(RuntimeError, match="Encountered an exception"):
+            PlotData(mock_long_df, {"x": "x"})
+
+    @pytest.mark.skipif(
+        condition=hasattr(pd.api, "interchange"),
+        reason="Tests graceful failure without support for dataframe interchange"
+    )
+    def test_data_interchange_support_test(self, mock_long_df):
+
+        with pytest.raises(TypeError, match="Support for non-pandas DataFrame"):
+            PlotData(mock_long_df, {"x": "x"})

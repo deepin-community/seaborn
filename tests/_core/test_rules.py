@@ -4,7 +4,6 @@ import pandas as pd
 
 import pytest
 
-from seaborn.external.version import Version
 from seaborn._core.rules import (
     VarType,
     variable_type,
@@ -29,8 +28,6 @@ def test_variable_type():
     assert variable_type(s) == "numeric"
     assert variable_type(s.astype(int)) == "numeric"
     assert variable_type(s.astype(object)) == "numeric"
-    assert variable_type(s.to_numpy()) == "numeric"
-    assert variable_type(s.to_list()) == "numeric"
 
     s = pd.Series([1, 2, 3, np.nan], dtype=object)
     assert variable_type(s) == "numeric"
@@ -38,19 +35,27 @@ def test_variable_type():
     s = pd.Series([np.nan, np.nan])
     assert variable_type(s) == "numeric"
 
-    if Version(pd.__version__) >= Version("1.0.0"):
-        s = pd.Series([pd.NA, pd.NA])
-        assert variable_type(s) == "numeric"
+    s = pd.Series([pd.NA, pd.NA])
+    assert variable_type(s) == "numeric"
+
+    s = pd.Series([1, 2, pd.NA], dtype="Int64")
+    assert variable_type(s) == "numeric"
+
+    s = pd.Series([1, 2, pd.NA], dtype=object)
+    assert variable_type(s) == "numeric"
 
     s = pd.Series(["1", "2", "3"])
     assert variable_type(s) == "categorical"
-    assert variable_type(s.to_numpy()) == "categorical"
-    assert variable_type(s.to_list()) == "categorical"
 
     s = pd.Series([True, False, False])
     assert variable_type(s) == "numeric"
     assert variable_type(s, boolean_type="categorical") == "categorical"
     assert variable_type(s, boolean_type="boolean") == "boolean"
+
+    # This should arguably be datmetime, but we don't currently handle it correctly
+    # Test is mainly asserting that this doesn't fail on the boolean check.
+    s = pd.timedelta_range(1, periods=3, freq="D").to_series()
+    assert variable_type(s) == "categorical"
 
     s_cat = s.astype("category")
     assert variable_type(s_cat, boolean_type="categorical") == "categorical"
@@ -61,11 +66,12 @@ def test_variable_type():
     assert variable_type(s, boolean_type="boolean") == "boolean"
     assert variable_type(s, boolean_type="boolean", strict_boolean=True) == "numeric"
 
+    s = pd.Series([1, 0, 0])
+    assert variable_type(s, boolean_type="boolean") == "boolean"
+
     s = pd.Series([pd.Timestamp(1), pd.Timestamp(2)])
     assert variable_type(s) == "datetime"
     assert variable_type(s.astype(object)) == "datetime"
-    assert variable_type(s.to_numpy()) == "datetime"
-    assert variable_type(s.to_list()) == "datetime"
 
 
 def test_categorical_order():

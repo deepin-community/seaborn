@@ -3,6 +3,15 @@
 What's new in each version
 ==========================
 
+v0.13
+-----
+.. toctree::
+   :maxdepth: 2
+
+   v0.13.2
+   v0.13.1
+   v0.13.0
+
 v0.12
 -----
 .. toctree::

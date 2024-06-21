@@ -14,7 +14,7 @@ import pytest
 from pandas.testing import assert_frame_equal, assert_series_equal
 from numpy.testing import assert_array_equal, assert_array_almost_equal
 
-from seaborn._core.plot import Plot, Default
+from seaborn._core.plot import Plot, PlotConfig, Default
 from seaborn._core.scales import Continuous, Nominal, Temporal
 from seaborn._core.moves import Move, Shift, Dodge
 from seaborn._core.rules import categorical_order
@@ -23,7 +23,7 @@ from seaborn._marks.base import Mark
 from seaborn._stats.base import Stat
 from seaborn._marks.dot import Dot
 from seaborn._stats.aggregation import Agg
-from seaborn.external.version import Version
+from seaborn.utils import _version_predates
 
 assert_vector_equal = functools.partial(
     # TODO do we care about int/float dtype consistency?
@@ -36,12 +36,8 @@ assert_vector_equal = functools.partial(
 def assert_gridspec_shape(ax, nrows=1, ncols=1):
 
     gs = ax.get_gridspec()
-    if Version(mpl.__version__) < Version("3.2"):
-        assert gs._nrows == nrows
-        assert gs._ncols == ncols
-    else:
-        assert gs.nrows == nrows
-        assert gs.ncols == ncols
+    assert gs.nrows == nrows
+    assert gs.ncols == ncols
 
 
 class MockMark(Mark):
@@ -173,6 +169,15 @@ class TestInit:
         p = Plot(long_df["a"])
         assert p._data.source_data is None
         assert list(p._data.source_vars) == ["x"]
+
+    @pytest.mark.skipif(
+        condition=not hasattr(pd.api, "interchange"),
+        reason="Tests behavior assuming support for dataframe interchange"
+    )
+    def test_positional_interchangeable_dataframe(self, mock_long_df, long_df):
+
+        p = Plot(mock_long_df, x="x")
+        assert_frame_equal(p._data.source_data, long_df)
 
     def test_positional_too_many(self, long_df):
 
@@ -392,6 +397,16 @@ class TestScaling:
         xfm_log = ax_log.xaxis.get_transform().transform
         assert_array_equal(xfm_log([1, 10, 100]), [0, 1, 2])
 
+    def test_paired_with_common_fallback(self):
+
+        x0, x1 = [1, 2, 3], [1, 10, 100]
+        p = Plot().pair(x=[x0, x1]).scale(x="pow", x1="log").plot()
+        ax_pow, ax_log = p._figure.axes
+        xfm_pow = ax_pow.xaxis.get_transform().transform
+        assert_array_equal(xfm_pow([1, 2, 3]), [1, 4, 9])
+        xfm_log = ax_log.xaxis.get_transform().transform
+        assert_array_equal(xfm_log([1, 10, 100]), [0, 1, 2])
+
     @pytest.mark.xfail(reason="Custom log scale needs log name for consistency")
     def test_log_scale_name(self):
 
@@ -450,9 +465,6 @@ class TestScaling:
         Plot(long_df, x=col).add(m).plot()
 
         expected = long_df[col].map(mpl.dates.date2num)
-        if Version(mpl.__version__) < Version("3.3"):
-            expected = expected + mpl.dates.date2num(np.datetime64('0000-12-31'))
-
         assert_vector_equal(m.passed_data[0]["x"], expected)
 
     def test_computed_var_ticks(self, long_df):
@@ -567,10 +579,6 @@ class TestScaling:
         assert_vector_equal(m.passed_data[0]["x"], pd.Series([0., 1.], [0, 1]))
         assert_vector_equal(m.passed_data[1]["x"], pd.Series([0., 1.], [0, 1]))
 
-    @pytest.mark.xfail(
-        Version(mpl.__version__) < Version("3.4.0"),
-        reason="Sharing paired categorical axes requires matplotlib>3.4.0"
-    )
     def test_pair_categories_shared(self):
 
         data = [("a", "a"), ("b", "c")]
@@ -926,8 +934,18 @@ class TestPlotting:
     def test_theme_error(self):
 
         p = Plot()
-        with pytest.raises(TypeError, match=r"theme\(\) takes 1 positional"):
+        with pytest.raises(TypeError, match=r"theme\(\) takes 2 positional"):
             p.theme("arg1", "arg2")
+
+    def test_theme_validation(self):
+
+        p = Plot()
+        # You'd think matplotlib would raise a TypeError here, but it doesn't
+        with pytest.raises(ValueError, match="Key axes.linewidth:"):
+            p.theme({"axes.linewidth": "thick"})
+
+        with pytest.raises(KeyError, match="not.a.key is not a valid rc"):
+            p.theme({"not.a.key": True})
 
     def test_stat(self, long_df):
 
@@ -1053,18 +1071,6 @@ class TestPlotting:
         if not gui_backend:
             assert msg
 
-    def test_png_repr(self):
-
-        p = Plot()
-        data, metadata = p._repr_png_()
-        img = Image.open(io.BytesIO(data))
-
-        assert not hasattr(p, "_figure")
-        assert isinstance(data, bytes)
-        assert img.format == "PNG"
-        assert sorted(metadata) == ["height", "width"]
-        # TODO test retina scaling
-
     def test_save(self):
 
         buf = io.BytesIO()
@@ -1084,6 +1090,32 @@ class TestPlotting:
         size = (4, 2)
         p = Plot().layout(size=size).plot()
         assert tuple(p._figure.get_size_inches()) == size
+
+    @pytest.mark.skipif(
+        _version_predates(mpl, "3.6"),
+        reason="mpl<3.6 does not have get_layout_engine",
+    )
+    def test_layout_extent(self):
+
+        p = Plot().layout(extent=(.1, .2, .6, 1)).plot()
+        assert p._figure.get_layout_engine().get()["rect"] == [.1, .2, .5, .8]
+
+    @pytest.mark.skipif(
+        _version_predates(mpl, "3.6"),
+        reason="mpl<3.6 does not have get_layout_engine",
+    )
+    def test_constrained_layout_extent(self):
+
+        p = Plot().layout(engine="constrained", extent=(.1, .2, .6, 1)).plot()
+        assert p._figure.get_layout_engine().get()["rect"] == [.1, .2, .5, .8]
+
+    def test_base_layout_extent(self):
+
+        p = Plot().layout(engine=None, extent=(.1, .2, .6, 1)).plot()
+        assert p._figure.subplotpars.left == 0.1
+        assert p._figure.subplotpars.right == 0.6
+        assert p._figure.subplotpars.bottom == 0.2
+        assert p._figure.subplotpars.top == 1
 
     def test_on_axes(self):
 
@@ -1105,10 +1137,6 @@ class TestPlotting:
         assert m.passed_axes == f.axes
         assert p._figure is f
 
-    @pytest.mark.skipif(
-        Version(mpl.__version__) < Version("3.4"),
-        reason="mpl<3.4 does not have SubFigure",
-    )
     @pytest.mark.parametrize("facet", [True, False])
     def test_on_subfigure(self, facet):
 
@@ -1140,11 +1168,30 @@ class TestPlotting:
         with pytest.raises(RuntimeError, match="Cannot create multiple subplots"):
             p2.plot()
 
-    def test_on_disables_layout_algo(self):
+    @pytest.mark.skipif(
+        _version_predates(mpl, "3.6"),
+        reason="Requires newer matplotlib layout engine API"
+    )
+    def test_on_layout_algo_default(self):
 
-        f = mpl.figure.Figure()
+        class MockEngine(mpl.layout_engine.ConstrainedLayoutEngine):
+            ...
+
+        f = mpl.figure.Figure(layout=MockEngine())
         p = Plot().on(f).plot()
-        assert not p._figure.get_tight_layout()
+        layout_engine = p._figure.get_layout_engine()
+        assert layout_engine.__class__.__name__ == "MockEngine"
+
+    @pytest.mark.skipif(
+        _version_predates(mpl, "3.6"),
+        reason="Requires newer matplotlib layout engine API"
+    )
+    def test_on_layout_algo_spec(self):
+
+        f = mpl.figure.Figure(layout="constrained")
+        p = Plot().on(f).layout(engine="tight").plot()
+        layout_engine = p._figure.get_layout_engine()
+        assert layout_engine.__class__.__name__ == "TightLayoutEngine"
 
     def test_axis_labels_from_constructor(self, long_df):
 
@@ -1387,13 +1434,10 @@ class TestFacetInterface:
     @pytest.mark.parametrize("algo", ["tight", "constrained"])
     def test_layout_algo(self, algo):
 
-        if algo == "constrained" and Version(mpl.__version__) < Version("3.3.0"):
-            pytest.skip("constrained_layout requires matplotlib>=3.3")
-
         p = Plot().facet(["a", "b"]).limit(x=(.1, .9))
 
         p1 = p.layout(engine=algo).plot()
-        p2 = p.layout(engine=None).plot()
+        p2 = p.layout(engine="none").plot()
 
         # Force a draw (we probably need a method for this)
         p1.save(io.BytesIO())
@@ -1404,7 +1448,7 @@ class TestFacetInterface:
 
         sep1 = bb12.corners()[0, 0] - bb11.corners()[2, 0]
         sep2 = bb22.corners()[0, 0] - bb21.corners()[2, 0]
-        assert sep1 < sep2
+        assert sep1 <= sep2
 
     def test_axis_sharing(self, long_df):
 
@@ -1718,16 +1762,21 @@ class TestPairInterface:
 
     def test_limits(self, long_df):
 
-        limit = (-2, 24)
-        p = Plot(long_df, y="y").pair(x=["x", "z"]).limit(x1=limit).plot()
-        ax1 = p._figure.axes[1]
-        assert ax1.get_xlim() == limit
+        lims = (-3, 10), (-2, 24)
+        p = Plot(long_df, y="y").pair(x=["x", "z"]).limit(x=lims[0], x1=lims[1]).plot()
+        for ax, lim in zip(p._figure.axes, lims):
+            assert ax.get_xlim() == lim
 
     def test_labels(self, long_df):
 
-        label = "Z"
-        p = Plot(long_df, y="y").pair(x=["x", "z"]).label(x1=label).plot()
-        ax1 = p._figure.axes[1]
+        label = "zed"
+        p = (
+            Plot(long_df, y="y")
+            .pair(x=["x", "z"])
+            .label(x=str.capitalize, x1=label)
+        )
+        ax0, ax1 = p.plot()._figure.axes
+        assert ax0.get_xlabel() == "X"
         assert ax1.get_xlabel() == label
 
 
@@ -1803,6 +1852,12 @@ class TestLabelVisibility:
         for s in subplots[1:]:
             ax = s["ax"]
             assert ax.xaxis.get_label().get_visible()
+            # mpl3.7 added a getter for tick params, but both yaxis and xaxis return
+            # the same entry of "labelleft" instead of  "labelbottom" for xaxis
+            if not _version_predates(mpl, "3.7"):
+                assert ax.xaxis.get_tick_params()["labelleft"]
+            else:
+                assert len(ax.get_xticklabels()) > 0
             assert all(t.get_visible() for t in ax.get_xticklabels())
 
         for s in subplots[1:-1]:
@@ -1827,6 +1882,12 @@ class TestLabelVisibility:
         for s in subplots[-2:]:
             ax = s["ax"]
             assert ax.xaxis.get_label().get_visible()
+            # mpl3.7 added a getter for tick params, but both yaxis and xaxis return
+            # the same entry of "labelleft" instead of  "labelbottom" for xaxis
+            if not _version_predates(mpl, "3.7"):
+                assert ax.xaxis.get_tick_params()["labelleft"]
+            else:
+                assert len(ax.get_xticklabels()) > 0
             assert all(t.get_visible() for t in ax.get_xticklabels())
 
         for s in subplots[:-2]:
@@ -2056,7 +2117,7 @@ class TestLegend:
         labels = [t.get_text() for t in legend.get_texts()]
         assert labels == names
 
-        if Version(mpl.__version__) >= Version("3.2"):
+        if not _version_predates(mpl, "3.5"):
             contents = legend.get_children()[0]
             assert len(contents.findobj(mpl.lines.Line2D)) == len(names)
             assert len(contents.findobj(mpl.patches.Patch)) == len(names)
@@ -2111,9 +2172,178 @@ class TestLegend:
         for text in legend.texts:
             assert float(text.get_text()) > 1e7
 
+    def test_layer_legend(self, xy):
+
+        p = Plot(**xy).add(MockMark(), label="a").add(MockMark(), label="b").plot()
+        legend = p._figure.legends[0]
+        assert legend.texts
+        for text, expected in zip(legend.texts, "ab"):
+            assert text.get_text() == expected
+
+    def test_layer_legend_with_scale_legend(self, xy):
+
+        s = pd.Series(["a", "b", "a", "c"], name="s")
+        p = Plot(**xy, color=s).add(MockMark(), label="x").plot()
+
+        legend = p._figure.legends[0]
+        texts = [t.get_text() for t in legend.findobj(mpl.text.Text)]
+        assert "x" in texts
+        for val in s.unique():
+            assert val in texts
+
+    def test_layer_legend_title(self, xy):
+
+        p = Plot(**xy).add(MockMark(), label="x").label(legend="layer").plot()
+        assert p._figure.legends[0].get_title().get_text() == "layer"
+
 
 class TestDefaultObject:
 
     def test_default_repr(self):
 
         assert repr(Default()) == "<default>"
+
+
+class TestThemeConfig:
+
+    @pytest.fixture(autouse=True)
+    def reset_config(self):
+        yield
+        Plot.config.theme.reset()
+
+    def test_default(self):
+
+        p = Plot().plot()
+        ax = p._figure.axes[0]
+        expected = Plot.config.theme["axes.facecolor"]
+        assert mpl.colors.same_color(ax.get_facecolor(), expected)
+
+    def test_setitem(self):
+
+        color = "#CCC"
+        Plot.config.theme["axes.facecolor"] = color
+        p = Plot().plot()
+        ax = p._figure.axes[0]
+        assert mpl.colors.same_color(ax.get_facecolor(), color)
+
+    def test_update(self):
+
+        color = "#DDD"
+        Plot.config.theme.update({"axes.facecolor": color})
+        p = Plot().plot()
+        ax = p._figure.axes[0]
+        assert mpl.colors.same_color(ax.get_facecolor(), color)
+
+    def test_reset(self):
+
+        orig = Plot.config.theme["axes.facecolor"]
+        Plot.config.theme.update({"axes.facecolor": "#EEE"})
+        Plot.config.theme.reset()
+        p = Plot().plot()
+        ax = p._figure.axes[0]
+        assert mpl.colors.same_color(ax.get_facecolor(), orig)
+
+    def test_copy(self):
+
+        key, val = "axes.facecolor", ".95"
+        orig = Plot.config.theme[key]
+        theme = Plot.config.theme.copy()
+        theme.update({key: val})
+        assert Plot.config.theme[key] == orig
+
+    def test_html_repr(self):
+
+        res = Plot.config.theme._repr_html_()
+        for tag in ["div", "table", "tr", "td"]:
+            assert res.count(f"<{tag}") == res.count(f"</{tag}")
+
+        for key in Plot.config.theme:
+            assert f"<td>{key}:</td>" in res
+
+
+class TestDisplayConfig:
+
+    @pytest.fixture(autouse=True)
+    def reset_config(self):
+        yield
+        Plot.config.display.update(PlotConfig().display)
+
+    def test_png_format(self):
+
+        Plot.config.display["format"] = "png"
+
+        assert Plot()._repr_svg_() is None
+        assert Plot().plot()._repr_svg_() is None
+
+        def assert_valid_png(p):
+            data, metadata = p._repr_png_()
+            img = Image.open(io.BytesIO(data))
+            assert img.format == "PNG"
+            assert sorted(metadata) == ["height", "width"]
+
+        assert_valid_png(Plot())
+        assert_valid_png(Plot().plot())
+
+    def test_svg_format(self):
+
+        Plot.config.display["format"] = "svg"
+
+        assert Plot()._repr_png_() is None
+        assert Plot().plot()._repr_png_() is None
+
+        def assert_valid_svg(p):
+            res = p._repr_svg_()
+            root = xml.etree.ElementTree.fromstring(res)
+            assert root.tag == "{http://www.w3.org/2000/svg}svg"
+
+        assert_valid_svg(Plot())
+        assert_valid_svg(Plot().plot())
+
+    def test_png_scaling(self):
+
+        Plot.config.display["scaling"] = 1.
+        res1, meta1 = Plot()._repr_png_()
+
+        Plot.config.display["scaling"] = .5
+        res2, meta2 = Plot()._repr_png_()
+
+        assert meta1["width"] / 2 == meta2["width"]
+        assert meta1["height"] / 2 == meta2["height"]
+
+        img1 = Image.open(io.BytesIO(res1))
+        img2 = Image.open(io.BytesIO(res2))
+        assert img1.size == img2.size
+
+    def test_svg_scaling(self):
+
+        Plot.config.display["format"] = "svg"
+
+        Plot.config.display["scaling"] = 1.
+        res1 = Plot()._repr_svg_()
+
+        Plot.config.display["scaling"] = .5
+        res2 = Plot()._repr_svg_()
+
+        root1 = xml.etree.ElementTree.fromstring(res1)
+        root2 = xml.etree.ElementTree.fromstring(res2)
+
+        def getdim(root, dim):
+            return float(root.attrib[dim][:-2])
+
+        assert getdim(root1, "width") / 2 == getdim(root2, "width")
+        assert getdim(root1, "height") / 2 == getdim(root2, "height")
+
+    def test_png_hidpi(self):
+
+        res1, meta1 = Plot()._repr_png_()
+
+        Plot.config.display["hidpi"] = False
+        res2, meta2 = Plot()._repr_png_()
+
+        assert meta1["width"] == meta2["width"]
+        assert meta1["height"] == meta2["height"]
+
+        img1 = Image.open(io.BytesIO(res1))
+        img2 = Image.open(io.BytesIO(res2))
+        assert img1.size[0] // 2 == img2.size[0]
+        assert img1.size[1] // 2 == img2.size[1]

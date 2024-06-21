@@ -13,7 +13,7 @@ License: Expat
 
 Files: debian/*
 Copyright: 2014, Yaroslav Halchenko <debian@onerussian.com>
-           2020-2022, Nilesh Patra <nilesh@debian.org>
+           2020-2024, Nilesh Patra <nilesh@debian.org>
 License: BSD-3-clause
 
 License: BSD-3-clause

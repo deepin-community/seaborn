@@ -1,3 +1,22 @@
+seaborn (0.13.2-3) unstable; urgency=medium
+
+  * Remove "export PYBUILD_SYSTEM=flit" (Closes: #1067276)
+  * Update 32-bit patch to make an almost equal assertion for a test
+
+ -- Nilesh Patra <nilesh@iki.fi>  Sun, 24 Mar 2024 10:33:11 +0530
+
+seaborn (0.13.2-2) unstable; urgency=medium
+ 
+  * Add patch to avoid test failures on 32-bit (Closes: #1063273)
+
+ -- Nilesh Patra <nilesh@debian.org>  Fri, 09 Feb 2024 22:22:55 +0530
+
+seaborn (0.13.2-1) unstable; urgency=medium
+
+  * New upstream version 0.13.2 (Closes: #1053945)
+
+ -- Nilesh Patra <nilesh@debian.org>  Tue, 30 Jan 2024 20:55:35 +0530
+
 seaborn (0.12.2-1) unstable; urgency=medium
 
   * New upstream version 0.12.2 (Closes: #1028858)

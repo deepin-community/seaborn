@@ -14,6 +14,8 @@ from seaborn._statistics import (
     Histogram,
     ECDF,
     EstimateAggregator,
+    LetterValues,
+    WeightedAggregator,
     _validate_errorbar_arg,
     _no_scipy,
 )
@@ -24,6 +26,10 @@ class DistributionFixtures:
     @pytest.fixture
     def x(self, rng):
         return rng.normal(0, 1, 100)
+
+    @pytest.fixture
+    def x2(self, rng):
+        return rng.normal(0, 1, 742)  # random value to avoid edge cases
 
     @pytest.fixture
     def y(self, rng):
@@ -440,6 +446,15 @@ class TestECDF(DistributionFixtures):
         assert_array_almost_equal(stat[1:], np.arange(len(x)) + 1)
         assert stat[0] == 0
 
+    def test_univariate_percent(self, x2):
+
+        ecdf = ECDF(stat="percent")
+        stat, vals = ecdf(x2)
+
+        assert_array_equal(vals[1:], np.sort(x2))
+        assert_array_almost_equal(stat[1:], (np.arange(len(x2)) + 1) / len(x2) * 100)
+        assert stat[0] == 0
+
     def test_univariate_proportion_weights(self, x, weights):
 
         ecdf = ECDF()
@@ -616,3 +631,85 @@ class TestEstimateAggregator:
         for arg, exception in bad_args:
             with pytest.raises(exception, match="`errorbar` must be"):
                 _validate_errorbar_arg(arg)
+
+
+class TestWeightedAggregator:
+
+    def test_weighted_mean(self, long_df):
+
+        long_df["weight"] = long_df["x"]
+        est = WeightedAggregator("mean")
+        out = est(long_df, "y")
+        expected = np.average(long_df["y"], weights=long_df["weight"])
+        assert_array_equal(out["y"], expected)
+        assert_array_equal(out["ymin"], np.nan)
+        assert_array_equal(out["ymax"], np.nan)
+
+    def test_weighted_ci(self, long_df):
+
+        long_df["weight"] = long_df["x"]
+        est = WeightedAggregator("mean", "ci")
+        out = est(long_df, "y")
+        expected = np.average(long_df["y"], weights=long_df["weight"])
+        assert_array_equal(out["y"], expected)
+        assert (out["ymin"] <= out["y"]).all()
+        assert (out["ymax"] >= out["y"]).all()
+
+    def test_limited_estimator(self):
+
+        with pytest.raises(ValueError, match="Weighted estimator must be 'mean'"):
+            WeightedAggregator("median")
+
+    def test_limited_ci(self):
+
+        with pytest.raises(ValueError, match="Error bar method must be 'ci'"):
+            WeightedAggregator("mean", "sd")
+
+
+class TestLetterValues:
+
+    @pytest.fixture
+    def x(self, rng):
+        return pd.Series(rng.standard_t(10, 10_000))
+
+    def test_levels(self, x):
+
+        res = LetterValues(k_depth="tukey", outlier_prop=0, trust_alpha=0)(x)
+        k = res["k"]
+        expected = np.concatenate([np.arange(k), np.arange(k - 1)[::-1]])
+        assert_array_equal(res["levels"], expected)
+
+    def test_values(self, x):
+
+        res = LetterValues(k_depth="tukey", outlier_prop=0, trust_alpha=0)(x)
+        assert_array_equal(np.percentile(x, res["percs"]), res["values"])
+
+    def test_fliers(self, x):
+
+        res = LetterValues(k_depth="tukey", outlier_prop=0, trust_alpha=0)(x)
+        fliers = res["fliers"]
+        values = res["values"]
+        assert ((fliers < values.min()) | (fliers > values.max())).all()
+
+    def test_median(self, x):
+
+        res = LetterValues(k_depth="tukey", outlier_prop=0, trust_alpha=0)(x)
+        assert res["median"] == np.median(x)
+
+    def test_k_depth_int(self, x):
+
+        res = LetterValues(k_depth=(k := 12), outlier_prop=0, trust_alpha=0)(x)
+        assert res["k"] == k
+        assert len(res["levels"]) == (2 * k - 1)
+
+    def test_trust_alpha(self, x):
+
+        res1 = LetterValues(k_depth="trustworthy", outlier_prop=0, trust_alpha=.1)(x)
+        res2 = LetterValues(k_depth="trustworthy", outlier_prop=0, trust_alpha=.001)(x)
+        assert res1["k"] > res2["k"]
+
+    def test_outlier_prop(self, x):
+
+        res1 = LetterValues(k_depth="proportion", outlier_prop=.001, trust_alpha=0)(x)
+        res2 = LetterValues(k_depth="proportion", outlier_prop=.1, trust_alpha=0)(x)
+        assert res1["k"] > res2["k"]

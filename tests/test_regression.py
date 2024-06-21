@@ -7,10 +7,7 @@ import pandas as pd
 
 import pytest
 import numpy.testing as npt
-try:
-    import pandas.testing as pdt
-except ImportError:
-    import pandas.util.testing as pdt
+import pandas.testing as pdt
 
 try:
     import statsmodels.regression.linear_model as smlm
@@ -19,7 +16,6 @@ except ImportError:
     _no_statsmodels = True
 
 from seaborn import regression as lm
-from seaborn.external.version import Version
 from seaborn.palettes import color_palette
 
 rs = np.random.RandomState(0)
@@ -214,6 +210,12 @@ class TestRegressionPlotter:
 
         # Compare the vector of y_hat values
         npt.assert_array_almost_equal(yhat_poly, yhat_smod)
+
+    @pytest.mark.parametrize("option", ["logistic", "robust", "lowess"])
+    @pytest.mark.skipif(not _no_statsmodels, reason="statsmodels installed")
+    def test_statsmodels_missing_errors(self, long_df, option):
+        with pytest.raises(RuntimeError, match=rf"`{option}=True` requires"):
+            lm.regplot(long_df, x="x", y="y", **{option: True})
 
     def test_regress_logx(self):
 
@@ -608,8 +610,6 @@ class TestRegressionPlots:
         npt.assert_array_equal(red, red_scatter.get_facecolors()[0, :3])
         npt.assert_array_equal(blue, blue_scatter.get_facecolors()[0, :3])
 
-    @pytest.mark.skipif(Version(mpl.__version__) < Version("3.4"),
-                        reason="MPL bug #15967")
     @pytest.mark.parametrize("sharex", [True, False])
     def test_lmplot_facet_truncate(self, sharex):
 
@@ -665,6 +665,12 @@ class TestRegressionPlots:
 
         x, y = ax.lines[1].get_xydata().T
         npt.assert_array_equal(x, np.sort(self.df.x))
+
+    @pytest.mark.parametrize("option", ["robust", "lowess"])
+    @pytest.mark.skipif(not _no_statsmodels, reason="statsmodels installed")
+    def test_residplot_statsmodels_missing_errors(self, long_df, option):
+        with pytest.raises(RuntimeError, match=rf"`{option}=True` requires"):
+            lm.residplot(long_df, x="x", y="y", **{option: True})
 
     def test_three_point_colors(self):
 
