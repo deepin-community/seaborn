@@ -6,22 +6,21 @@ import matplotlib.pyplot as plt
 import pytest
 import numpy.testing as npt
 from numpy.testing import assert_array_equal, assert_array_almost_equal
-try:
-    import pandas.testing as tm
-except ImportError:
-    import pandas.util.testing as tm
+import pandas.testing as tm
 
-from seaborn._oldcore import categorical_order
+from seaborn._base import categorical_order
 from seaborn import rcmod
 from seaborn.palettes import color_palette
 from seaborn.relational import scatterplot
 from seaborn.distributions import histplot, kdeplot, distplot
 from seaborn.categorical import pointplot
+from seaborn.utils import _version_predates
 from seaborn import axisgrid as ag
 from seaborn._testing import (
     assert_plots_equal,
     assert_colors_equal,
 )
+from seaborn._compat import get_legend_handles
 
 rs = np.random.RandomState(0)
 
@@ -331,7 +330,7 @@ class TestFacetGrid:
         g = ag.FacetGrid(self.df, despine=False,
                          subplot_kws=dict(projection="polar"))
         for ax in g.axes.flat:
-            assert "PolarAxesSubplot" in str(type(ax))
+            assert "PolarAxes" in ax.__class__.__name__
 
     def test_gridspec_kws(self):
         ratios = [3, 1, 2]
@@ -708,6 +707,19 @@ class TestFacetGrid:
                     assert mpl.colors.same_color(tick.tick1line.get_color(), color)
                     assert mpl.colors.same_color(tick.tick2line.get_color(), color)
                     assert tick.get_pad() == pad
+
+    @pytest.mark.skipif(
+        condition=not hasattr(pd.api, "interchange"),
+        reason="Tests behavior assuming support for dataframe interchange"
+    )
+    def test_data_interchange(self, mock_long_df, long_df):
+
+        g = ag.FacetGrid(mock_long_df, col="a", row="b")
+        g.map(scatterplot, "x", "y")
+
+        assert g.axes.shape == (long_df["b"].nunique(), long_df["a"].nunique())
+        for ax in g.axes.flat:
+            assert len(ax.collections) == 1
 
 
 class TestPairGrid:
@@ -1280,7 +1292,7 @@ class TestPairGrid:
         g.map_offdiag(histplot)
         g.add_legend()
 
-        assert len(g._legend.legendHandles) == len(self.df["a"].unique())
+        assert len(get_legend_handles(g._legend)) == len(self.df["a"].unique())
 
     def test_pairplot(self):
 
@@ -1412,17 +1424,25 @@ class TestPairGrid:
 
         assert_plots_equal(ax1, ax2, labels=False)
 
+    @pytest.mark.skipif(_version_predates(mpl, "3.7.0"), reason="Matplotlib bug")
     def test_pairplot_markers(self):
 
         vars = ["x", "y", "z"]
         markers = ["o", "X", "s"]
         g = ag.pairplot(self.df, hue="a", vars=vars, markers=markers)
-        m1 = g._legend.legendHandles[0].get_paths()[0]
-        m2 = g._legend.legendHandles[1].get_paths()[0]
+        m1 = get_legend_handles(g._legend)[0].get_marker()
+        m2 = get_legend_handles(g._legend)[1].get_marker()
         assert m1 != m2
 
         with pytest.warns(UserWarning):
             g = ag.pairplot(self.df, hue="a", vars=vars, markers=markers[:-2])
+
+    def test_pairplot_column_multiindex(self):
+
+        cols = pd.MultiIndex.from_arrays([["x", "y"], [1, 2]])
+        df = self.df[["x", "y"]].set_axis(cols, axis=1)
+        g = ag.pairplot(df)
+        assert g.diag_vars == list(cols)
 
     def test_corner_despine(self):
 
@@ -1456,6 +1476,19 @@ class TestPairGrid:
                     assert mpl.colors.same_color(tick.tick1line.get_color(), color)
                     assert mpl.colors.same_color(tick.tick2line.get_color(), color)
                     assert tick.get_pad() == pad
+
+    @pytest.mark.skipif(
+        condition=not hasattr(pd.api, "interchange"),
+        reason="Tests behavior assuming support for dataframe interchange"
+    )
+    def test_data_interchange(self, mock_long_df, long_df):
+
+        g = ag.PairGrid(mock_long_df, vars=["x", "y", "z"], hue="a")
+        g.map(scatterplot)
+        assert g.axes.shape == (3, 3)
+        for ax in g.axes.flat:
+            pts = ax.collections[0].get_offsets()
+            assert len(pts) == len(long_df)
 
 
 class TestJointGrid:

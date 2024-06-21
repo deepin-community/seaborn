@@ -9,9 +9,8 @@ from matplotlib.colors import same_color, to_rgba
 import pytest
 from numpy.testing import assert_array_equal, assert_array_almost_equal
 
-from seaborn.external.version import Version
 from seaborn.palettes import color_palette
-from seaborn._oldcore import categorical_order
+from seaborn._base import categorical_order, unique_markers
 
 from seaborn.relational import (
     _RelationalPlotter,
@@ -22,8 +21,8 @@ from seaborn.relational import (
     scatterplot
 )
 
-from seaborn.utils import _draw_figure
-from seaborn._compat import get_colormap
+from seaborn.utils import _draw_figure, _version_predates
+from seaborn._compat import get_colormap, get_legend_handles
 from seaborn._testing import assert_plots_equal
 
 
@@ -47,7 +46,9 @@ def long_semantics(request):
 
 class Helpers:
 
-    # TODO Better place for these?
+    @pytest.fixture
+    def levels(self, long_df):
+        return {var: categorical_order(long_df[var]) for var in ["a", "b"]}
 
     def scatter_rgbs(self, collections):
         rgbs = []
@@ -96,7 +97,7 @@ class TestRelationalPlotter(Helpers):
         p.assign_variables(data=wide_df)
         assert p.input_format == "wide"
         assert list(p.variables) == ["x", "y", "hue", "style"]
-        assert len(p.plot_data) == np.product(wide_df.shape)
+        assert len(p.plot_data) == np.prod(wide_df.shape)
 
         x = p.plot_data["x"]
         expected_x = np.tile(wide_df.index, wide_df.shape[1])
@@ -128,7 +129,7 @@ class TestRelationalPlotter(Helpers):
 
         numeric_df = long_df.select_dtypes("number")
 
-        assert len(p.plot_data) == np.product(numeric_df.shape)
+        assert len(p.plot_data) == np.prod(numeric_df.shape)
 
         x = p.plot_data["x"]
         expected_x = np.tile(numeric_df.index, numeric_df.shape[1])
@@ -159,7 +160,7 @@ class TestRelationalPlotter(Helpers):
         p.assign_variables(data=wide_array)
         assert p.input_format == "wide"
         assert list(p.variables) == ["x", "y", "hue", "style"]
-        assert len(p.plot_data) == np.product(wide_array.shape)
+        assert len(p.plot_data) == np.prod(wide_array.shape)
 
         nrow, ncol = wide_array.shape
 
@@ -190,7 +191,7 @@ class TestRelationalPlotter(Helpers):
         p.assign_variables(data=flat_array)
         assert p.input_format == "wide"
         assert list(p.variables) == ["x", "y"]
-        assert len(p.plot_data) == np.product(flat_array.shape)
+        assert len(p.plot_data) == np.prod(flat_array.shape)
 
         x = p.plot_data["x"]
         expected_x = np.arange(flat_array.shape[0])
@@ -577,6 +578,15 @@ class TestRelationalPlotter(Helpers):
             expected_paths = [paths[val] for val in grp_df["a"]]
             assert self.paths_equal(points.get_paths(), expected_paths)
 
+    def test_relplot_weighted_estimator(self, long_df):
+
+        g = relplot(data=long_df, x="a", y="y", weights="x", kind="line")
+        ydata = g.ax.lines[0].get_ydata()
+        for i, level in enumerate(categorical_order(long_df["a"])):
+            pos_df = long_df[long_df["a"] == level]
+            expected = np.average(pos_df["y"], weights=pos_df["x"])
+            assert ydata[i] == pytest.approx(expected)
+
     def test_relplot_stringy_numerics(self, long_df):
 
         long_df["x_str"] = long_df["x"].astype(str)
@@ -667,6 +677,16 @@ class TestRelationalPlotter(Helpers):
         )
         assert g.axes.shape == (1, len(col_data.unique()))
 
+    def test_relplot_scatter_unused_variables(self, long_df):
+
+        with pytest.warns(UserWarning, match="The `units` parameter"):
+            g = relplot(long_df, x="x", y="y", units="a")
+        assert g.ax is not None
+
+        with pytest.warns(UserWarning, match="The `weights` parameter"):
+            g = relplot(long_df, x="x", y="y", weights="x")
+        assert g.ax is not None
+
     def test_ax_kwarg_removal(self, long_df):
 
         f, ax = plt.subplots()
@@ -681,6 +701,41 @@ class TestRelationalPlotter(Helpers):
         for text in g.legend.texts:
             assert float(text.get_text()) > 1e7
 
+    def test_lineplot_2d_dashes(self, long_df):
+        ax = lineplot(data=long_df[["x", "y"]], dashes=[(5, 5), (10, 10)])
+        for line in ax.get_lines():
+            assert line.is_dashed()
+
+    def test_legend_attributes_hue(self, long_df):
+
+        kws = {"s": 50, "linewidth": 1, "marker": "X"}
+        g = relplot(long_df, x="x", y="y", hue="a", **kws)
+        palette = color_palette()
+        for i, pt in enumerate(get_legend_handles(g.legend)):
+            assert same_color(pt.get_color(), palette[i])
+            assert pt.get_markersize() == np.sqrt(kws["s"])
+            assert pt.get_markeredgewidth() == kws["linewidth"]
+            if not _version_predates(mpl, "3.7.0"):
+                assert pt.get_marker() == kws["marker"]
+
+    def test_legend_attributes_style(self, long_df):
+
+        kws = {"s": 50, "linewidth": 1, "color": "r"}
+        g = relplot(long_df, x="x", y="y", style="a", **kws)
+        for pt in get_legend_handles(g.legend):
+            assert pt.get_markersize() == np.sqrt(kws["s"])
+            assert pt.get_markeredgewidth() == kws["linewidth"]
+            assert same_color(pt.get_color(), "r")
+
+    def test_legend_attributes_hue_and_style(self, long_df):
+
+        kws = {"s": 50, "linewidth": 1}
+        g = relplot(long_df, x="x", y="y", hue="a", style="b", **kws)
+        for pt in get_legend_handles(g.legend):
+            if pt.get_label() not in ["a", "b"]:
+                assert pt.get_markersize() == np.sqrt(kws["s"])
+                assert pt.get_markeredgewidth() == kws["linewidth"]
+
 
 class TestLinePlotter(SharedAxesLevelTests, Helpers):
 
@@ -690,199 +745,119 @@ class TestLinePlotter(SharedAxesLevelTests, Helpers):
 
         return to_rgba(ax.lines[-1].get_color())
 
-    def test_legend_data(self, long_df):
+    def test_legend_no_semantics(self, long_df):
 
-        f, ax = plt.subplots()
-
-        p = _LinePlotter(
-            data=long_df,
-            variables=dict(x="x", y="y"),
-            legend="full"
-        )
-        p.add_legend_data(ax)
-        handles, labels = ax.get_legend_handles_labels()
+        ax = lineplot(long_df, x="x", y="y")
+        handles, _ = ax.get_legend_handles_labels()
         assert handles == []
 
-        # --
+    def test_legend_hue_categorical(self, long_df, levels):
 
-        ax.clear()
-        p = _LinePlotter(
-            data=long_df,
-            variables=dict(x="x", y="y", hue="a"),
-            legend="full",
-        )
-        p.add_legend_data(ax)
+        ax = lineplot(long_df, x="x", y="y", hue="a")
         handles, labels = ax.get_legend_handles_labels()
         colors = [h.get_color() for h in handles]
-        assert labels == p._hue_map.levels
-        assert colors == p._hue_map(p._hue_map.levels)
+        assert labels == levels["a"]
+        assert colors == color_palette(n_colors=len(labels))
 
-        # --
+    def test_legend_hue_and_style_same(self, long_df, levels):
 
-        ax.clear()
-        p = _LinePlotter(
-            data=long_df,
-            variables=dict(x="x", y="y", hue="a", style="a"),
-            legend="full",
-        )
-        p.map_style(markers=True)
-        p.add_legend_data(ax)
+        ax = lineplot(long_df, x="x", y="y", hue="a", style="a", markers=True)
         handles, labels = ax.get_legend_handles_labels()
         colors = [h.get_color() for h in handles]
         markers = [h.get_marker() for h in handles]
-        assert labels == p._hue_map.levels
-        assert labels == p._style_map.levels
-        assert colors == p._hue_map(p._hue_map.levels)
-        assert markers == p._style_map(p._style_map.levels, "marker")
+        assert labels == levels["a"]
+        assert colors == color_palette(n_colors=len(labels))
+        assert markers == unique_markers(len(labels))
 
-        # --
+    def test_legend_hue_and_style_diff(self, long_df, levels):
 
-        ax.clear()
-        p = _LinePlotter(
-            data=long_df,
-            variables=dict(x="x", y="y", hue="a", style="b"),
-            legend="full",
-        )
-        p.map_style(markers=True)
-        p.add_legend_data(ax)
+        ax = lineplot(long_df, x="x", y="y", hue="a", style="b", markers=True)
         handles, labels = ax.get_legend_handles_labels()
         colors = [h.get_color() for h in handles]
         markers = [h.get_marker() for h in handles]
-        expected_labels = (
-            ["a"]
-            + p._hue_map.levels
-            + ["b"] + p._style_map.levels
-        )
-        expected_colors = (
-            ["w"] + p._hue_map(p._hue_map.levels)
-            + ["w"] + [".2" for _ in p._style_map.levels]
-        )
-        expected_markers = (
-            [""] + ["None" for _ in p._hue_map.levels]
-            + [""] + p._style_map(p._style_map.levels, "marker")
-        )
+        expected_labels = ["a", *levels["a"], "b", *levels["b"]]
+        expected_colors = [
+            "w", *color_palette(n_colors=len(levels["a"])),
+            "w", *[".2" for _ in levels["b"]],
+        ]
+        expected_markers = [
+            "", *["None" for _ in levels["a"]]
+            + [""] + unique_markers(len(levels["b"]))
+        ]
         assert labels == expected_labels
         assert colors == expected_colors
         assert markers == expected_markers
 
-        # --
+    def test_legend_hue_and_size_same(self, long_df, levels):
 
-        ax.clear()
-        p = _LinePlotter(
-            data=long_df,
-            variables=dict(x="x", y="y", hue="a", size="a"),
-            legend="full"
-        )
-        p.add_legend_data(ax)
+        ax = lineplot(long_df, x="x", y="y", hue="a", size="a")
         handles, labels = ax.get_legend_handles_labels()
         colors = [h.get_color() for h in handles]
         widths = [h.get_linewidth() for h in handles]
-        assert labels == p._hue_map.levels
-        assert labels == p._size_map.levels
-        assert colors == p._hue_map(p._hue_map.levels)
-        assert widths == p._size_map(p._size_map.levels)
+        assert labels == levels["a"]
+        assert colors == color_palette(n_colors=len(levels["a"]))
+        expected_widths = [
+            w * mpl.rcParams["lines.linewidth"]
+            for w in np.linspace(2, 0.5, len(levels["a"]))
+        ]
+        assert widths == expected_widths
 
-        # --
+    @pytest.mark.parametrize("var", ["hue", "size", "style"])
+    def test_legend_numerical_full(self, long_df, var):
 
         x, y = np.random.randn(2, 40)
         z = np.tile(np.arange(20), 2)
 
-        p = _LinePlotter(variables=dict(x=x, y=y, hue=z))
+        ax = lineplot(x=x, y=y, **{var: z}, legend="full")
+        _, labels = ax.get_legend_handles_labels()
+        assert labels == [str(z_i) for z_i in sorted(set(z))]
 
-        ax.clear()
-        p.legend = "full"
-        p.add_legend_data(ax)
-        handles, labels = ax.get_legend_handles_labels()
-        assert labels == [str(l) for l in p._hue_map.levels]
+    @pytest.mark.parametrize("var", ["hue", "size", "style"])
+    def test_legend_numerical_brief(self, var):
 
-        ax.clear()
-        p.legend = "brief"
-        p.add_legend_data(ax)
-        handles, labels = ax.get_legend_handles_labels()
-        assert len(labels) < len(p._hue_map.levels)
+        x, y = np.random.randn(2, 40)
+        z = np.tile(np.arange(20), 2)
 
-        p = _LinePlotter(variables=dict(x=x, y=y, size=z))
+        ax = lineplot(x=x, y=y, **{var: z}, legend="brief")
+        _, labels = ax.get_legend_handles_labels()
+        if var == "style":
+            assert labels == [str(z_i) for z_i in sorted(set(z))]
+        else:
+            assert labels == ["0", "4", "8", "12", "16"]
 
-        ax.clear()
-        p.legend = "full"
-        p.add_legend_data(ax)
-        handles, labels = ax.get_legend_handles_labels()
-        assert labels == [str(l) for l in p._size_map.levels]
+    def test_legend_value_error(self, long_df):
 
-        ax.clear()
-        p.legend = "brief"
-        p.add_legend_data(ax)
-        handles, labels = ax.get_legend_handles_labels()
-        assert len(labels) < len(p._size_map.levels)
+        with pytest.raises(ValueError, match=r"`legend` must be"):
+            lineplot(long_df, x="x", y="y", hue="a", legend="bad_value")
 
-        ax.clear()
-        p.legend = "auto"
-        p.add_legend_data(ax)
-        handles, labels = ax.get_legend_handles_labels()
-        assert len(labels) < len(p._size_map.levels)
+    @pytest.mark.parametrize("var", ["hue", "size"])
+    def test_legend_log_norm(self, var):
 
-        ax.clear()
-        p.legend = True
-        p.add_legend_data(ax)
-        handles, labels = ax.get_legend_handles_labels()
-        assert len(labels) < len(p._size_map.levels)
+        x, y = np.random.randn(2, 40)
+        z = np.tile(np.arange(20), 2)
 
-        ax.clear()
-        p.legend = "bad_value"
-        with pytest.raises(ValueError):
-            p.add_legend_data(ax)
-
-        ax.clear()
-        p = _LinePlotter(
-            variables=dict(x=x, y=y, hue=z + 1),
-            legend="brief"
-        )
-        p.map_hue(norm=mpl.colors.LogNorm()),
-        p.add_legend_data(ax)
-        handles, labels = ax.get_legend_handles_labels()
+        norm = mpl.colors.LogNorm()
+        ax = lineplot(x=x, y=y, **{var: z + 1, f"{var}_norm": norm})
+        _, labels = ax.get_legend_handles_labels()
         assert float(labels[1]) / float(labels[0]) == 10
 
-        ax.clear()
-        p = _LinePlotter(
-            variables=dict(x=x, y=y, hue=z % 2),
-            legend="auto"
-        )
-        p.map_hue(norm=mpl.colors.LogNorm()),
-        p.add_legend_data(ax)
-        handles, labels = ax.get_legend_handles_labels()
+    @pytest.mark.parametrize("var", ["hue", "size"])
+    def test_legend_binary_var(self, var):
+
+        x, y = np.random.randn(2, 40)
+        z = np.tile(np.arange(20), 2)
+
+        ax = lineplot(x=x, y=y, hue=z % 2)
+        _, labels = ax.get_legend_handles_labels()
         assert labels == ["0", "1"]
 
-        ax.clear()
-        p = _LinePlotter(
-            variables=dict(x=x, y=y, size=z + 1),
-            legend="brief"
-        )
-        p.map_size(norm=mpl.colors.LogNorm())
-        p.add_legend_data(ax)
-        handles, labels = ax.get_legend_handles_labels()
-        assert float(labels[1]) / float(labels[0]) == 10
+    @pytest.mark.parametrize("var", ["hue", "size"])
+    def test_legend_binary_numberic_brief(self, long_df, var):
 
-        ax.clear()
-        p = _LinePlotter(
-            data=long_df,
-            variables=dict(x="x", y="y", hue="f"),
-            legend="brief",
-        )
-        p.add_legend_data(ax)
+        ax = lineplot(long_df, x="x", y="y", **{var: "f"}, legend="brief")
+        _, labels = ax.get_legend_handles_labels()
         expected_labels = ['0.20', '0.22', '0.24', '0.26', '0.28']
-        handles, labels = ax.get_legend_handles_labels()
         assert labels == expected_labels
-
-        ax.clear()
-        p = _LinePlotter(
-            data=long_df,
-            variables=dict(x="x", y="y", size="f"),
-            legend="brief",
-        )
-        p.add_legend_data(ax)
-        expected_levels = ['0.20', '0.22', '0.24', '0.26', '0.28']
-        handles, labels = ax.get_legend_handles_labels()
-        assert labels == expected_levels
 
     def test_plot(self, long_df, repeated_df):
 
@@ -1093,6 +1068,15 @@ class TestLinePlotter(SharedAxesLevelTests, Helpers):
         ax.clear()
         p.plot(ax, {})
 
+    def test_weights(self, long_df):
+
+        ax = lineplot(long_df, x="a", y="y", weights="x")
+        vals = ax.lines[0].get_ydata()
+        for i, level in enumerate(categorical_order(long_df["a"])):
+            pos_df = long_df[long_df["a"] == level]
+            expected = np.average(pos_df["y"], weights=pos_df["x"])
+            assert vals[i] == pytest.approx(expected)
+
     def test_non_aggregated_data(self):
 
         x = [1, 2, 3, 4]
@@ -1207,10 +1191,41 @@ class TestLinePlotter(SharedAxesLevelTests, Helpers):
         ax = lineplot(data=wide_df, ax=ax1)
         assert ax is ax1
 
+    def test_legend_attributes_with_hue(self, long_df):
+
+        kws = {"marker": "o", "linewidth": 3}
+        ax = lineplot(long_df, x="x", y="y", hue="a", **kws)
+        palette = color_palette()
+        for i, line in enumerate(get_legend_handles(ax.get_legend())):
+            assert same_color(line.get_color(), palette[i])
+            assert line.get_linewidth() == kws["linewidth"]
+            if not _version_predates(mpl, "3.7.0"):
+                assert line.get_marker() == kws["marker"]
+
+    def test_legend_attributes_with_style(self, long_df):
+
+        kws = {"color": "r", "marker": "o", "linewidth": 3}
+        ax = lineplot(long_df, x="x", y="y", style="a", **kws)
+        for line in get_legend_handles(ax.get_legend()):
+            assert same_color(line.get_color(), kws["color"])
+            if not _version_predates(mpl, "3.7.0"):
+                assert line.get_marker() == kws["marker"]
+            assert line.get_linewidth() == kws["linewidth"]
+
+    def test_legend_attributes_with_hue_and_style(self, long_df):
+
+        kws = {"marker": "o", "linewidth": 3}
+        ax = lineplot(long_df, x="x", y="y", hue="a", style="b", **kws)
+        for line in get_legend_handles(ax.get_legend()):
+            if line.get_label() not in ["a", "b"]:
+                if not _version_predates(mpl, "3.7.0"):
+                    assert line.get_marker() == kws["marker"]
+                assert line.get_linewidth() == kws["linewidth"]
+
     def test_lineplot_vs_relplot(self, long_df, long_semantics):
 
-        ax = lineplot(data=long_df, **long_semantics)
-        g = relplot(data=long_df, kind="line", **long_semantics)
+        ax = lineplot(data=long_df, legend=False, **long_semantics)
+        g = relplot(data=long_df, kind="line", legend=False, **long_semantics)
 
         lin_lines = ax.lines
         rel_lines = g.ax.lines
@@ -1226,7 +1241,7 @@ class TestLinePlotter(SharedAxesLevelTests, Helpers):
         wide_df, wide_array,
         wide_list_of_series, wide_list_of_arrays, wide_list_of_lists,
         flat_array, flat_series, flat_list,
-        long_df, missing_df, object_df
+        long_df, null_df, object_df
     ):
 
         f, ax = plt.subplots()
@@ -1282,10 +1297,10 @@ class TestLinePlotter(SharedAxesLevelTests, Helpers):
         lineplot(x="x", y="y", hue="a", style="b", data=long_df)
         ax.clear()
 
-        lineplot(x="x", y="y", hue="a", style="a", data=missing_df)
+        lineplot(x="x", y="y", hue="a", style="a", data=null_df)
         ax.clear()
 
-        lineplot(x="x", y="y", hue="a", style="b", data=missing_df)
+        lineplot(x="x", y="y", hue="a", style="b", data=null_df)
         ax.clear()
 
         lineplot(x="x", y="y", hue="a", size="a", data=long_df)
@@ -1294,10 +1309,10 @@ class TestLinePlotter(SharedAxesLevelTests, Helpers):
         lineplot(x="x", y="y", hue="a", size="s", data=long_df)
         ax.clear()
 
-        lineplot(x="x", y="y", hue="a", size="a", data=missing_df)
+        lineplot(x="x", y="y", hue="a", size="a", data=null_df)
         ax.clear()
 
-        lineplot(x="x", y="y", hue="a", size="s", data=missing_df)
+        lineplot(x="x", y="y", hue="a", size="s", data=null_df)
         ax.clear()
 
         lineplot(x="x", y="y", hue="f", data=object_df)
@@ -1307,6 +1322,9 @@ class TestLinePlotter(SharedAxesLevelTests, Helpers):
         ax.clear()
 
         lineplot(x="x", y="y", hue="f", size="s", data=object_df)
+        ax.clear()
+
+        lineplot(x="x", y="y", hue="a", data=long_df.iloc[:0])
         ax.clear()
 
     def test_ci_deprecation(self, long_df):
@@ -1347,188 +1365,166 @@ class TestScatterPlotter(SharedAxesLevelTests, Helpers):
         self.func(data=long_df, x="x", y="y", facecolors="C6", ax=ax)
         assert self.get_last_color(ax) == to_rgba("C6")
 
-        if Version(mpl.__version__) >= Version("3.1.0"):
-            # https://github.com/matplotlib/matplotlib/pull/12851
+        ax = plt.figure().subplots()
+        self.func(data=long_df, x="x", y="y", fc="C4", ax=ax)
+        assert self.get_last_color(ax) == to_rgba("C4")
 
-            ax = plt.figure().subplots()
-            self.func(data=long_df, x="x", y="y", fc="C4", ax=ax)
-            assert self.get_last_color(ax) == to_rgba("C4")
+    def test_legend_no_semantics(self, long_df):
 
-    def test_legend_data(self, long_df):
+        ax = scatterplot(long_df, x="x", y="y")
+        handles, _ = ax.get_legend_handles_labels()
+        assert not handles
 
-        m = mpl.markers.MarkerStyle("o")
-        default_mark = m.get_path().transformed(m.get_transform())
+    def test_legend_hue(self, long_df):
 
-        m = mpl.markers.MarkerStyle("")
-        null = m.get_path().transformed(m.get_transform())
-
-        f, ax = plt.subplots()
-
-        p = _ScatterPlotter(
-            data=long_df,
-            variables=dict(x="x", y="y"),
-            legend="full",
-        )
-        p.add_legend_data(ax)
+        ax = scatterplot(long_df, x="x", y="y", hue="a")
         handles, labels = ax.get_legend_handles_labels()
-        assert handles == []
-
-        # --
-
-        ax.clear()
-        p = _ScatterPlotter(
-            data=long_df,
-            variables=dict(x="x", y="y", hue="a"),
-            legend="full",
-        )
-        p.add_legend_data(ax)
-        handles, labels = ax.get_legend_handles_labels()
-        colors = [h.get_facecolors()[0] for h in handles]
-        expected_colors = p._hue_map(p._hue_map.levels)
-        assert labels == p._hue_map.levels
+        colors = [h.get_color() for h in handles]
+        expected_colors = color_palette(n_colors=len(handles))
         assert same_color(colors, expected_colors)
+        assert labels == categorical_order(long_df["a"])
 
-        # --
+    def test_legend_hue_style_same(self, long_df):
 
-        ax.clear()
-        p = _ScatterPlotter(
-            data=long_df,
-            variables=dict(x="x", y="y", hue="a", style="a"),
-            legend="full",
-        )
-        p.map_style(markers=True)
-        p.add_legend_data(ax)
+        ax = scatterplot(long_df, x="x", y="y", hue="a", style="a")
         handles, labels = ax.get_legend_handles_labels()
-        colors = [h.get_facecolors()[0] for h in handles]
-        expected_colors = p._hue_map(p._hue_map.levels)
-        paths = [h.get_paths()[0] for h in handles]
-        expected_paths = p._style_map(p._style_map.levels, "path")
-        assert labels == p._hue_map.levels
-        assert labels == p._style_map.levels
+        colors = [h.get_color() for h in handles]
+        expected_colors = color_palette(n_colors=len(labels))
+        markers = [h.get_marker() for h in handles]
+        expected_markers = unique_markers(len(handles))
         assert same_color(colors, expected_colors)
-        assert self.paths_equal(paths, expected_paths)
+        assert markers == expected_markers
+        assert labels == categorical_order(long_df["a"])
 
-        # --
+    def test_legend_hue_style_different(self, long_df):
 
-        ax.clear()
-        p = _ScatterPlotter(
-            data=long_df,
-            variables=dict(x="x", y="y", hue="a", style="b"),
-            legend="full",
-        )
-        p.map_style(markers=True)
-        p.add_legend_data(ax)
+        ax = scatterplot(long_df, x="x", y="y", hue="a", style="b")
         handles, labels = ax.get_legend_handles_labels()
-        colors = [h.get_facecolors()[0] for h in handles]
-        paths = [h.get_paths()[0] for h in handles]
-        expected_colors = (
-            ["w"] + p._hue_map(p._hue_map.levels)
-            + ["w"] + [".2" for _ in p._style_map.levels]
-        )
-        expected_paths = (
-            [null] + [default_mark for _ in p._hue_map.levels]
-            + [null] + p._style_map(p._style_map.levels, "path")
-        )
-        assert labels == (
-            ["a"] + p._hue_map.levels + ["b"] + p._style_map.levels
-        )
+        colors = [h.get_color() for h in handles]
+        expected_colors = [
+            "w", *color_palette(n_colors=long_df["a"].nunique()),
+            "w", *[".2" for _ in long_df["b"].unique()],
+        ]
+        markers = [h.get_marker() for h in handles]
+        expected_markers = [
+            "", *["o" for _ in long_df["a"].unique()],
+            "", *unique_markers(long_df["b"].nunique()),
+        ]
         assert same_color(colors, expected_colors)
-        assert self.paths_equal(paths, expected_paths)
+        assert markers == expected_markers
+        assert labels == [
+            "a", *categorical_order(long_df["a"]),
+            "b", *categorical_order(long_df["b"]),
+        ]
 
-        # --
+    def test_legend_data_hue_size_same(self, long_df):
 
-        ax.clear()
-        p = _ScatterPlotter(
-            data=long_df,
-            variables=dict(x="x", y="y", hue="a", size="a"),
-            legend="full"
-        )
-        p.add_legend_data(ax)
+        ax = scatterplot(long_df, x="x", y="y", hue="a", size="a")
         handles, labels = ax.get_legend_handles_labels()
-        colors = [h.get_facecolors()[0] for h in handles]
-        expected_colors = p._hue_map(p._hue_map.levels)
-        sizes = [h.get_sizes()[0] for h in handles]
-        expected_sizes = p._size_map(p._size_map.levels)
-        assert labels == p._hue_map.levels
-        assert labels == p._size_map.levels
+        colors = [h.get_color() for h in handles]
+        expected_colors = color_palette(n_colors=len(labels))
+        sizes = [h.get_markersize() for h in handles]
+        ms = mpl.rcParams["lines.markersize"] ** 2
+        expected_sizes = np.sqrt(
+            [ms * scl for scl in np.linspace(2, 0.5, len(handles))]
+        ).tolist()
         assert same_color(colors, expected_colors)
         assert sizes == expected_sizes
+        assert labels == categorical_order(long_df["a"])
+        assert ax.get_legend().get_title().get_text() == "a"
 
-        # --
+    def test_legend_size_numeric_list(self, long_df):
 
-        ax.clear()
-        sizes_list = [10, 100, 200]
-        p = _ScatterPlotter(
-            data=long_df,
-            variables=dict(x="x", y="y", size="s"),
-            legend="full",
-        )
-        p.map_size(sizes=sizes_list)
-        p.add_legend_data(ax)
+        size_list = [10, 100, 200]
+        ax = scatterplot(long_df, x="x", y="y", size="s", sizes=size_list)
         handles, labels = ax.get_legend_handles_labels()
-        sizes = [h.get_sizes()[0] for h in handles]
-        expected_sizes = p._size_map(p._size_map.levels)
-        assert labels == [str(l) for l in p._size_map.levels]
+        sizes = [h.get_markersize() for h in handles]
+        expected_sizes = list(np.sqrt(size_list))
         assert sizes == expected_sizes
+        assert labels == list(map(str, categorical_order(long_df["s"])))
+        assert ax.get_legend().get_title().get_text() == "s"
 
-        # --
+    def test_legend_size_numeric_dict(self, long_df):
 
-        ax.clear()
-        sizes_dict = {2: 10, 4: 100, 8: 200}
-        p = _ScatterPlotter(
-            data=long_df,
-            variables=dict(x="x", y="y", size="s"),
-            legend="full"
-        )
-        p.map_size(sizes=sizes_dict)
-        p.add_legend_data(ax)
+        size_dict = {2: 10, 4: 100, 8: 200}
+        ax = scatterplot(long_df, x="x", y="y", size="s", sizes=size_dict)
         handles, labels = ax.get_legend_handles_labels()
-        sizes = [h.get_sizes()[0] for h in handles]
-        expected_sizes = p._size_map(p._size_map.levels)
-        assert labels == [str(l) for l in p._size_map.levels]
+        sizes = [h.get_markersize() for h in handles]
+        order = categorical_order(long_df["s"])
+        expected_sizes = [np.sqrt(size_dict[k]) for k in order]
         assert sizes == expected_sizes
+        assert labels == list(map(str, order))
+        assert ax.get_legend().get_title().get_text() == "s"
 
-        # --
+    def test_legend_numeric_hue_full(self):
 
         x, y = np.random.randn(2, 40)
         z = np.tile(np.arange(20), 2)
+        ax = scatterplot(x=x, y=y, hue=z, legend="full")
+        _, labels = ax.get_legend_handles_labels()
+        assert labels == [str(z_i) for z_i in sorted(set(z))]
+        assert ax.get_legend().get_title().get_text() == ""
 
-        p = _ScatterPlotter(
-            variables=dict(x=x, y=y, hue=z),
-        )
+    def test_legend_numeric_hue_brief(self):
 
-        ax.clear()
-        p.legend = "full"
-        p.add_legend_data(ax)
-        handles, labels = ax.get_legend_handles_labels()
-        assert labels == [str(l) for l in p._hue_map.levels]
+        x, y = np.random.randn(2, 40)
+        z = np.tile(np.arange(20), 2)
+        ax = scatterplot(x=x, y=y, hue=z, legend="brief")
+        _, labels = ax.get_legend_handles_labels()
+        assert len(labels) < len(set(z))
 
-        ax.clear()
-        p.legend = "brief"
-        p.add_legend_data(ax)
-        handles, labels = ax.get_legend_handles_labels()
-        assert len(labels) < len(p._hue_map.levels)
+    def test_legend_numeric_size_full(self):
 
-        p = _ScatterPlotter(
-            variables=dict(x=x, y=y, size=z),
-        )
+        x, y = np.random.randn(2, 40)
+        z = np.tile(np.arange(20), 2)
+        ax = scatterplot(x=x, y=y, size=z, legend="full")
+        _, labels = ax.get_legend_handles_labels()
+        assert labels == [str(z_i) for z_i in sorted(set(z))]
 
-        ax.clear()
-        p.legend = "full"
-        p.add_legend_data(ax)
-        handles, labels = ax.get_legend_handles_labels()
-        assert labels == [str(l) for l in p._size_map.levels]
+    def test_legend_numeric_size_brief(self):
 
-        ax.clear()
-        p.legend = "brief"
-        p.add_legend_data(ax)
-        handles, labels = ax.get_legend_handles_labels()
-        assert len(labels) < len(p._size_map.levels)
+        x, y = np.random.randn(2, 40)
+        z = np.tile(np.arange(20), 2)
+        ax = scatterplot(x=x, y=y, size=z, legend="brief")
+        _, labels = ax.get_legend_handles_labels()
+        assert len(labels) < len(set(z))
 
-        ax.clear()
-        p.legend = "bad_value"
-        with pytest.raises(ValueError):
-            p.add_legend_data(ax)
+    def test_legend_attributes_hue(self, long_df):
+
+        kws = {"s": 50, "linewidth": 1, "marker": "X"}
+        ax = scatterplot(long_df, x="x", y="y", hue="a", **kws)
+        palette = color_palette()
+        for i, pt in enumerate(get_legend_handles(ax.get_legend())):
+            assert same_color(pt.get_color(), palette[i])
+            assert pt.get_markersize() == np.sqrt(kws["s"])
+            assert pt.get_markeredgewidth() == kws["linewidth"]
+            if not _version_predates(mpl, "3.7.0"):
+                # This attribute is empty on older matplotlibs
+                # but the legend looks correct so I assume it is a bug
+                assert pt.get_marker() == kws["marker"]
+
+    def test_legend_attributes_style(self, long_df):
+
+        kws = {"s": 50, "linewidth": 1, "color": "r"}
+        ax = scatterplot(long_df, x="x", y="y", style="a", **kws)
+        for pt in get_legend_handles(ax.get_legend()):
+            assert pt.get_markersize() == np.sqrt(kws["s"])
+            assert pt.get_markeredgewidth() == kws["linewidth"]
+            assert same_color(pt.get_color(), "r")
+
+    def test_legend_attributes_hue_and_style(self, long_df):
+
+        kws = {"s": 50, "linewidth": 1}
+        ax = scatterplot(long_df, x="x", y="y", hue="a", style="b", **kws)
+        for pt in get_legend_handles(ax.get_legend()):
+            if pt.get_label() not in ["a", "b"]:
+                assert pt.get_markersize() == np.sqrt(kws["s"])
+                assert pt.get_markeredgewidth() == kws["linewidth"]
+
+    def test_legend_value_error(self, long_df):
+
+        with pytest.raises(ValueError, match=r"`legend` must be"):
+            scatterplot(long_df, x="x", y="y", hue="a", legend="bad_value")
 
     def test_plot(self, long_df, repeated_df):
 
@@ -1666,11 +1662,7 @@ class TestScatterPlotter(SharedAxesLevelTests, Helpers):
         norm = mpl.colors.Normalize()
         colors = cmap(norm(long_df["y"].to_numpy()))
 
-        keys = ["c", "facecolor", "facecolors"]
-
-        if Version(mpl.__version__) >= Version("3.1.0"):
-            # https://github.com/matplotlib/matplotlib/pull/12851
-            keys.append("fc")
+        keys = ["c", "fc", "facecolor", "facecolors"]
 
         for key in keys:
 
@@ -1714,14 +1706,6 @@ class TestScatterPlotter(SharedAxesLevelTests, Helpers):
         )
 
         ax.clear()
-        scatterplot(data=long_df, x="x", y="y", size=long_df["x"])
-        scatterplot(data=long_df, x="x", y="y", size=long_df["x"] * 2)
-        points1, points2, *_ = ax.collections
-        assert (
-            points1.get_linewidths().item() < points2.get_linewidths().item()
-        )
-
-        ax.clear()
         lw = 2
         scatterplot(data=long_df, x="x", y="y", linewidth=lw)
         assert ax.collections[0].get_linewidths().item() == lw
@@ -1746,8 +1730,8 @@ class TestScatterPlotter(SharedAxesLevelTests, Helpers):
         legends = [ax.legend_ for ax in axs]
         legend_data = [
             {
-                label.get_text(): handle.get_sizes().item()
-                for label, handle in zip(legend.get_texts(), legend.legendHandles)
+                label.get_text(): handle.get_markersize()
+                for label, handle in zip(legend.get_texts(), get_legend_handles(legend))
             } for legend in legends
         ]
 
@@ -1773,6 +1757,12 @@ class TestScatterPlotter(SharedAxesLevelTests, Helpers):
             warnings.simplefilter("error")
             scatterplot(data=long_df, x="x", y="y", marker="+")
 
+    def test_short_form_kwargs(self, long_df):
+
+        ax = scatterplot(data=long_df, x="x", y="y", ec="g")
+        pts = ax.collections[0]
+        assert same_color(pts.get_edgecolors().squeeze(), "g")
+
     def test_scatterplot_vs_relplot(self, long_df, long_semantics):
 
         ax = scatterplot(data=long_df, **long_semantics)
@@ -1790,7 +1780,7 @@ class TestScatterPlotter(SharedAxesLevelTests, Helpers):
         wide_df, wide_array,
         flat_series, flat_array, flat_list,
         wide_list_of_series, wide_list_of_arrays, wide_list_of_lists,
-        long_df, missing_df, object_df
+        long_df, null_df, object_df
     ):
 
         f, ax = plt.subplots()
@@ -1843,10 +1833,10 @@ class TestScatterPlotter(SharedAxesLevelTests, Helpers):
         scatterplot(x="x", y="y", hue="a", style="b", data=long_df)
         ax.clear()
 
-        scatterplot(x="x", y="y", hue="a", style="a", data=missing_df)
+        scatterplot(x="x", y="y", hue="a", style="a", data=null_df)
         ax.clear()
 
-        scatterplot(x="x", y="y", hue="a", style="b", data=missing_df)
+        scatterplot(x="x", y="y", hue="a", style="b", data=null_df)
         ax.clear()
 
         scatterplot(x="x", y="y", hue="a", size="a", data=long_df)
@@ -1855,10 +1845,10 @@ class TestScatterPlotter(SharedAxesLevelTests, Helpers):
         scatterplot(x="x", y="y", hue="a", size="s", data=long_df)
         ax.clear()
 
-        scatterplot(x="x", y="y", hue="a", size="a", data=missing_df)
+        scatterplot(x="x", y="y", hue="a", size="a", data=null_df)
         ax.clear()
 
-        scatterplot(x="x", y="y", hue="a", size="s", data=missing_df)
+        scatterplot(x="x", y="y", hue="a", size="s", data=null_df)
         ax.clear()
 
         scatterplot(x="x", y="y", hue="f", data=object_df)

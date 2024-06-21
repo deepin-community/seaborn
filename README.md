@@ -6,7 +6,7 @@ seaborn: statistical data visualization
 =======================================
 
 [![PyPI Version](https://img.shields.io/pypi/v/seaborn.svg)](https://pypi.org/project/seaborn/)
-[![License](https://img.shields.io/pypi/l/seaborn.svg)](https://github.com/mwaskom/seaborn/blob/master/LICENSE)
+[![License](https://img.shields.io/pypi/l/seaborn.svg)](https://github.com/mwaskom/seaborn/blob/master/LICENSE.md)
 [![DOI](https://joss.theoj.org/papers/10.21105/joss.03021/status.svg)](https://doi.org/10.21105/joss.03021)
 [![Tests](https://github.com/mwaskom/seaborn/workflows/CI/badge.svg)](https://github.com/mwaskom/seaborn/actions)
 [![Code Coverage](https://codecov.io/gh/mwaskom/seaborn/branch/master/graph/badge.svg)](https://codecov.io/gh/mwaskom/seaborn)
@@ -26,7 +26,7 @@ To build the documentation locally, please refer to [`doc/README.md`](doc/README
 Dependencies
 ------------
 
-Seaborn supports Python 3.7+ and no longer supports Python 2.
+Seaborn supports Python 3.8+.
 
 Installation requires [numpy](https://numpy.org/), [pandas](https://pandas.pydata.org/), and [matplotlib](https://matplotlib.org/). Some advanced statistical functionality requires [scipy](https://www.scipy.org/) and/or [statsmodels](https://www.statsmodels.org/).
 
@@ -38,7 +38,7 @@ The latest stable release (and required dependencies) can be installed from PyPI
 
     pip install seaborn
 
-It is also possible to include optional statistical dependencies (only relevant for v0.12+):
+It is also possible to include optional statistical dependencies:
 
     pip install seaborn[stats]
 

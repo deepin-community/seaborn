@@ -21,10 +21,7 @@ except ImportError:
     _no_fastcluster = True
 
 import numpy.testing as npt
-try:
-    import pandas.testing as pdt
-except ImportError:
-    import pandas.util.testing as pdt
+import pandas.testing as pdt
 import pytest
 
 from seaborn import matrix as mat
@@ -265,6 +262,20 @@ class TestHeatmap:
         hm = mat._HeatMapper(self.df_unif, **kws)
         npt.assert_array_equal(cmap(np.inf), hm.cmap(np.inf))
 
+    def test_explicit_none_norm(self):
+
+        vals = np.linspace(.2, 1, 9)
+        cmap = mpl.cm.binary
+        _, (ax1, ax2) = plt.subplots(2)
+
+        mat.heatmap([vals], vmin=0, cmap=cmap, ax=ax1)
+        fc_default_norm = ax1.collections[0].get_facecolors()
+
+        mat.heatmap([vals], vmin=0, norm=None, cmap=cmap, ax=ax2)
+        fc_explicit_norm = ax2.collections[0].get_facecolors()
+
+        npt.assert_array_almost_equal(fc_default_norm, fc_explicit_norm, 2)
+
     def test_ticklabels_off(self):
         kws = self.default_kws.copy()
         kws['xticklabels'] = False
@@ -376,8 +387,6 @@ class TestHeatmap:
         assert len(f.axes) == 2
         plt.close(f)
 
-    @pytest.mark.xfail(mpl.__version__ == "3.1.1",
-                       reason="matplotlib 3.1.1 bug")
     def test_heatmap_axes(self):
 
         ax = mat.heatmap(self.df_norm)
@@ -432,10 +441,7 @@ class TestHeatmap:
     def test_square_aspect(self):
 
         ax = mat.heatmap(self.df_norm, square=True)
-        obs_aspect = ax.get_aspect()
-        # mpl>3.3 returns 1 for setting "equal" aspect
-        # so test for the two possible equal outcomes
-        assert obs_aspect == "equal" or obs_aspect == 1
+        npt.assert_equal(ax.get_aspect(), 1)
 
     def test_mask_validation(self):
 
@@ -668,8 +674,6 @@ class TestDendrogram:
 
         assert len(ax.collections[0].get_paths()) == len(d.dependent_coord)
 
-    @pytest.mark.xfail(mpl.__version__ == "3.1.1",
-                       reason="matplotlib 3.1.1 bug")
     def test_dendrogram_rotate(self):
         kws = self.default_kws.copy()
         kws['rotate'] = True

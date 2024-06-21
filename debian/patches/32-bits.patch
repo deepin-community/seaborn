@@ -1,0 +1,25 @@
+Description: Use almost_equal instead of strict equals to avoid test chokes due to precision issues on 32-bit archs
+Author: Nilesh Patra <nilesh@debian.org>
+Last-Update: 2024-01-31
+--- a/tests/test_categorical.py
++++ b/tests/test_categorical.py
+@@ -1209,7 +1209,7 @@
+         assert np.in1d(
+             np.percentile(data, [25, 75]).round(4), verts[val_idx].round(4).flat
+         ).all()
+-        assert_array_equal(verts[val_idx, 1:, 0], verts[val_idx, :-1, 2])
++        assert_array_almost_equal(verts[val_idx, 1:, 0], verts[val_idx, :-1, 2], decimal=3)
+ 
+     @pytest.mark.parametrize("orient,col", [("x", "y"), ("y", "z")])
+     def test_single_var(self, long_df, orient, col):
+--- a/tests/test_distributions.py
++++ b/tests/test_distributions.py
+@@ -1017,7 +1017,7 @@
+         for c1, c2 in zip(ax1.collections, ax2.collections):
+             assert len(get_contour_coords(c1)) == len(get_contour_coords(c2))
+             for arr1, arr2 in zip(get_contour_coords(c1), get_contour_coords(c2)):
+-                assert_array_equal(arr1, arr2)
++                assert_array_almost_equal(arr1, arr2)
+ 
+     def test_bandwidth(self, rng):
+ 

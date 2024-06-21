@@ -25,7 +25,7 @@ from seaborn._core.properties import (
     Fill,
 )
 from seaborn.palettes import color_palette
-from seaborn.external.version import Version
+from seaborn.utils import _version_predates
 
 
 class TestContinuous:
@@ -191,9 +191,11 @@ class TestContinuous:
 
         n = 3
         a = self.setup_ticks(x, count=2, minor=n)
-        # I am not sure why matplotlib's minor ticks include the
-        # largest major location but exclude the smalllest one ...
-        expected = np.linspace(0, 1, n + 2)[1:]
+        expected = np.linspace(0, 1, n + 2)
+        if _version_predates(mpl, "3.8.0rc1"):
+            # I am not sure why matplotlib <3.8  minor ticks include the
+            # largest major location but exclude the smalllest one ...
+            expected = expected[1:]
         assert_array_equal(a.minor.locator(), expected)
 
     def test_log_tick_default(self, x):
@@ -569,10 +571,6 @@ class TestNominal:
         s = Nominal()._setup(x, Coordinate())
         assert_array_equal(s(x), [])
 
-    @pytest.mark.skipif(
-        Version(mpl.__version__) < Version("3.4.0"),
-        reason="Test failing on older matplotlib for unclear reasons",
-    )
     def test_finalize(self, x):
 
         ax = mpl.figure.Figure().subplots()
@@ -649,10 +647,6 @@ class TestTemporal:
         assert isinstance(locator, mpl.dates.AutoDateLocator)
         assert isinstance(formatter, mpl.dates.AutoDateFormatter)
 
-    @pytest.mark.skipif(
-        Version(mpl.__version__) < Version("3.3.0"),
-        reason="Test requires new matplotlib date epoch."
-    )
     def test_tick_locator(self, t):
 
         locator = mpl.dates.YearLocator(month=3, day=15)
@@ -669,10 +663,6 @@ class TestTemporal:
         locator = ax.xaxis.get_major_locator()
         assert set(locator.maxticks.values()) == {n}
 
-    @pytest.mark.skipif(
-        Version(mpl.__version__) < Version("3.3.0"),
-        reason="Test requires new matplotlib date epoch."
-    )
     def test_label_formatter(self, t):
 
         formatter = mpl.dates.DateFormatter("%Y")
@@ -714,25 +704,13 @@ class TestBoolean:
         [
             (object, np.nan),
             (object, None),
-            # TODO add boolean when we don't need the skipif below
+            ("boolean", pd.NA),
         ]
     )
     def test_coordinate_missing(self, x, dtype, value):
 
         x = x.astype(dtype)
         x[2] = value
-        s = Boolean()._setup(x, Coordinate())
-        assert_array_equal(s(x), x.astype(float))
-
-    @pytest.mark.skipif(
-        # TODO merge into test above when removing
-        Version(pd.__version__) < Version("1.0.0"),
-        reason="Test requires nullable booleans",
-    )
-    def test_coordinate_with_pd_na(self, x):
-
-        x = x.astype("boolean")
-        x[2] = pd.NA
         s = Boolean()._setup(x, Coordinate())
         assert_array_equal(s(x), x.astype(float))
 

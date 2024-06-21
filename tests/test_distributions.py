@@ -14,7 +14,7 @@ from seaborn.palettes import (
     color_palette,
     light_palette,
 )
-from seaborn._oldcore import (
+from seaborn._base import (
     categorical_order,
 )
 from seaborn._statistics import (
@@ -31,7 +31,7 @@ from seaborn.distributions import (
     kdeplot,
     rugplot,
 )
-from seaborn.external.version import Version
+from seaborn.utils import _version_predates
 from seaborn.axisgrid import FacetGrid
 from seaborn._testing import (
     assert_plots_equal,
@@ -40,21 +40,24 @@ from seaborn._testing import (
 )
 
 
-def get_contour_coords(c):
-    """Provide compatability for change in contour artist type in mpl3.5."""
-    # See https://github.com/matplotlib/matplotlib/issues/20906
+def get_contour_coords(c, filter_empty=False):
+    """Provide compatability for change in contour artist types."""
     if isinstance(c, mpl.collections.LineCollection):
+        # See https://github.com/matplotlib/matplotlib/issues/20906
         return c.get_segments()
-    elif isinstance(c, mpl.collections.PathCollection):
-        return [p.vertices[:np.argmax(p.codes) + 1] for p in c.get_paths()]
+    elif isinstance(c, (mpl.collections.PathCollection, mpl.contour.QuadContourSet)):
+        return [
+            p.vertices[:np.argmax(p.codes) + 1] for p in c.get_paths()
+            if len(p) or not filter_empty
+        ]
 
 
 def get_contour_color(c):
-    """Provide compatability for change in contour artist type in mpl3.5."""
-    # See https://github.com/matplotlib/matplotlib/issues/20906
+    """Provide compatability for change in contour artist types."""
     if isinstance(c, mpl.collections.LineCollection):
+        # See https://github.com/matplotlib/matplotlib/issues/20906
         return c.get_color()
-    elif isinstance(c, mpl.collections.PathCollection):
+    elif isinstance(c, (mpl.collections.PathCollection, mpl.contour.QuadContourSet)):
         if c.get_facecolor().size:
             return c.get_facecolor()
         else:
@@ -904,7 +907,7 @@ class TestKDEPlotUnivariate(SharedAxesLevelTests):
             assert label.get_text() == level
 
         legend_artists = ax.legend_.findobj(mpl.lines.Line2D)
-        if Version(mpl.__version__) < Version("3.5.0b0"):
+        if _version_predates(mpl, "3.5.0b0"):
             # https://github.com/matplotlib/matplotlib/pull/20699
             legend_artists = legend_artists[::2]
         palette = color_palette()
@@ -916,6 +919,10 @@ class TestKDEPlotUnivariate(SharedAxesLevelTests):
         kdeplot(data=long_df, x="x", hue="a", legend=False)
 
         assert ax.legend_ is None
+
+    def test_replaced_kws(self, long_df):
+        with pytest.raises(TypeError, match=r"`data2` has been removed"):
+            kdeplot(data=long_df, x="x", data2="y")
 
 
 class TestKDEPlotBivariate:
@@ -962,7 +969,9 @@ class TestKDEPlotBivariate:
             f, ax = plt.subplots()
             kdeplot(data=long_df, x="x", y="y", hue="c", fill=fill)
             for c in ax.collections:
-                if fill or Version(mpl.__version__) >= Version("3.5.0b0"):
+                if not _version_predates(mpl, "3.8.0rc1"):
+                    assert isinstance(c, mpl.contour.QuadContourSet)
+                elif fill or not _version_predates(mpl, "3.5.0b0"):
                     assert isinstance(c, mpl.collections.PathCollection)
                 else:
                     assert isinstance(c, mpl.collections.LineCollection)
@@ -978,8 +987,8 @@ class TestKDEPlotBivariate:
         kdeplot(x=x, y=y, hue=hue, common_norm=True, ax=ax1)
         kdeplot(x=x, y=y, hue=hue, common_norm=False, ax=ax2)
 
-        n_seg_1 = sum(len(get_contour_coords(c)) > 0 for c in ax1.collections)
-        n_seg_2 = sum(len(get_contour_coords(c)) > 0 for c in ax2.collections)
+        n_seg_1 = sum(len(get_contour_coords(c, True)) for c in ax1.collections)
+        n_seg_2 = sum(len(get_contour_coords(c, True)) for c in ax2.collections)
         assert n_seg_2 > n_seg_1
 
     def test_log_scale(self, rng):
@@ -1006,7 +1015,9 @@ class TestKDEPlotBivariate:
         ax2.contour(10 ** xx, yy, density, levels=levels)
 
         for c1, c2 in zip(ax1.collections, ax2.collections):
-            assert_array_equal(get_contour_coords(c1), get_contour_coords(c2))
+            assert len(get_contour_coords(c1)) == len(get_contour_coords(c2))
+            for arr1, arr2 in zip(get_contour_coords(c1), get_contour_coords(c2)):
+                assert_array_equal(arr1, arr2)
 
     def test_bandwidth(self, rng):
 
@@ -1066,8 +1077,8 @@ class TestKDEPlotBivariate:
         cmap = mpl.colors.ListedColormap(color_list)
         ax = kdeplot(data=long_df, x="x", y="y", cmap=cmap)
         for c in ax.collections:
-            color = to_rgb(get_contour_color(c).squeeze())
-            assert color in color_list
+            for color in get_contour_color(c):
+                assert to_rgb(color) in color_list
 
     def test_contour_fill_colors(self, long_df):
 
@@ -1080,8 +1091,8 @@ class TestKDEPlotBivariate:
         cmap = light_palette(color, reverse=True, as_cmap=True)
         lut = cmap(np.linspace(0, 1, 256))
         for c in ax.collections:
-            color = c.get_facecolor().squeeze()
-            assert color in lut
+            for color in c.get_facecolor():
+                assert color in lut
 
     def test_colorbar(self, long_df):
 
@@ -1099,7 +1110,9 @@ class TestKDEPlotBivariate:
         kdeplot(**plot_kws, levels=np.linspace(thresh, 1, n), ax=ax2)
 
         for c1, c2 in zip(ax1.collections, ax2.collections):
-            assert_array_equal(get_contour_coords(c1), get_contour_coords(c2))
+            assert len(get_contour_coords(c1)) == len(get_contour_coords(c2))
+            for arr1, arr2 in zip(get_contour_coords(c1), get_contour_coords(c2)):
+                assert_array_equal(arr1, arr2)
 
         with pytest.raises(ValueError):
             kdeplot(**plot_kws, levels=[0, 1, 2])
@@ -1111,7 +1124,10 @@ class TestKDEPlotBivariate:
         kdeplot(**plot_kws, levels=n, thresh=0, ax=ax2)
 
         for c1, c2 in zip(ax1.collections, ax2.collections):
-            assert_array_equal(get_contour_coords(c1), get_contour_coords(c2))
+            assert len(get_contour_coords(c1)) == len(get_contour_coords(c2))
+            for arr1, arr2 in zip(get_contour_coords(c1), get_contour_coords(c2)):
+                assert_array_equal(arr1, arr2)
+
         for c1, c2 in zip(ax1.collections, ax2.collections):
             assert_array_equal(c1.get_facecolors(), c2.get_facecolors())
 
@@ -1433,12 +1449,19 @@ class TestHistPlotUnivariate(SharedAxesLevelTests):
             assert_array_almost_equal(start, wide_df[col].min())
             assert_array_almost_equal(stop, wide_df[col].max())
 
-    def test_weights_with_missing(self, missing_df):
+    def test_range_with_inf(self, rng):
 
-        ax = histplot(missing_df, x="x", weights="s", bins=5)
+        x = rng.normal(0, 1, 20)
+        ax = histplot([-np.inf, *x])
+        leftmost_edge = min(p.get_x() for p in ax.patches)
+        assert leftmost_edge == x.min()
+
+    def test_weights_with_missing(self, null_df):
+
+        ax = histplot(null_df, x="x", weights="s", bins=5)
 
         bar_heights = [bar.get_height() for bar in ax.patches]
-        total_weight = missing_df[["x", "s"]].dropna()["s"].sum()
+        total_weight = null_df[["x", "s"]].dropna()["s"].sum()
         assert sum(bar_heights) == pytest.approx(total_weight)
 
     def test_weight_norm(self, rng):
@@ -1480,10 +1503,6 @@ class TestHistPlotUnivariate(SharedAxesLevelTests):
         ymax, ymin = ax.get_ylim()
         assert ymax > ymin
 
-    @pytest.mark.skipif(
-        Version(np.__version__) < Version("1.17"),
-        reason="Histogram over datetime64 requires numpy >= 1.17",
-    )
     def test_datetime_scale(self, long_df):
 
         f, (ax1, ax2) = plt.subplots(2)
@@ -1730,7 +1749,7 @@ class TestHistPlotUnivariate(SharedAxesLevelTests):
     def test_log_scale_explicit(self, rng):
 
         x = rng.lognormal(0, 2, 1000)
-        ax = histplot(x, log_scale=True, binwidth=1)
+        ax = histplot(x, log_scale=True, binrange=(-3, 3), binwidth=1)
 
         bar_widths = [b.get_width() for b in ax.patches]
         steps = np.divide(bar_widths[1:], bar_widths[:-1])
@@ -1742,7 +1761,7 @@ class TestHistPlotUnivariate(SharedAxesLevelTests):
 
         f, ax = plt.subplots()
         ax.set_xscale("log")
-        histplot(x, binwidth=1, ax=ax)
+        histplot(x, binrange=(-3, 3), binwidth=1, ax=ax)
 
         bar_widths = [b.get_width() for b in ax.patches]
         steps = np.divide(bar_widths[1:], bar_widths[:-1])
@@ -1831,6 +1850,11 @@ class TestHistPlotUnivariate(SharedAxesLevelTests):
         assert len(handles) == 1
         assert labels == ["a label"]
 
+    def test_default_color_scout_cleanup(self, flat_series):
+
+        ax = histplot(flat_series)
+        assert len(ax.containers) == 1
+
 
 class TestHistPlotBivariate:
 
@@ -1843,8 +1867,8 @@ class TestHistPlotBivariate:
         mesh = ax.collections[0]
         mesh_data = mesh.get_array()
 
-        assert_array_equal(mesh_data.data, counts.T.flat)
-        assert_array_equal(mesh_data.mask, counts.T.flat == 0)
+        assert_array_equal(mesh_data.data.flat, counts.T.flat)
+        assert_array_equal(mesh_data.mask.flat, counts.T.flat == 0)
 
         edges = itertools.product(y_edges[:-1], x_edges[:-1])
         for i, (y, x) in enumerate(edges):
@@ -1866,8 +1890,8 @@ class TestHistPlotBivariate:
 
             counts, (x_edges, y_edges) = hist(sub_df["x"], sub_df["y"])
 
-            assert_array_equal(mesh_data.data, counts.T.flat)
-            assert_array_equal(mesh_data.mask, counts.T.flat == 0)
+            assert_array_equal(mesh_data.data.flat, counts.T.flat)
+            assert_array_equal(mesh_data.mask.flat, counts.T.flat == 0)
 
             edges = itertools.product(y_edges[:-1], x_edges[:-1])
             for i, (y, x) in enumerate(edges):
@@ -1888,8 +1912,8 @@ class TestHistPlotBivariate:
 
             counts, (x_edges, y_edges) = hist(sub_df["x"], sub_df["y"])
 
-            assert_array_equal(mesh_data.data, counts.T.flat)
-            assert_array_equal(mesh_data.mask, counts.T.flat == 0)
+            assert_array_equal(mesh_data.data.flat, counts.T.flat)
+            assert_array_equal(mesh_data.mask.flat, counts.T.flat == 0)
 
             edges = itertools.product(y_edges[:-1], x_edges[:-1])
             for i, (y, x) in enumerate(edges):
@@ -1910,8 +1934,8 @@ class TestHistPlotBivariate:
 
             counts, (x_edges, y_edges) = hist(sub_df["x"], sub_df["y"])
 
-            assert_array_equal(mesh_data.data, counts.T.flat)
-            assert_array_equal(mesh_data.mask, counts.T.flat == 0)
+            assert_array_equal(mesh_data.data.flat, counts.T.flat)
+            assert_array_equal(mesh_data.mask.flat, counts.T.flat == 0)
 
             edges = itertools.product(y_edges[:-1], x_edges[:-1])
             for i, (y, x) in enumerate(edges):
@@ -1929,7 +1953,7 @@ class TestHistPlotBivariate:
         mesh = ax.collections[0]
         mesh_data = mesh.get_array()
 
-        assert_array_equal(mesh_data.data, counts.T.flat)
+        assert_array_equal(mesh_data.data.flat, counts.T.flat)
 
         edges = itertools.product(y_edges[:-1], x_edges[:-1])
         for i, (y_i, x_i) in enumerate(edges):
@@ -1947,8 +1971,8 @@ class TestHistPlotBivariate:
         mesh = ax.collections[0]
         mesh_data = mesh.get_array()
 
-        assert_array_equal(mesh_data.data, counts.T.flat)
-        assert_array_equal(mesh_data.mask, (counts <= thresh).T.flat)
+        assert_array_equal(mesh_data.data.flat, counts.T.flat)
+        assert_array_equal(mesh_data.mask.flat, (counts <= thresh).T.flat)
 
     def test_mesh_sticky_edges(self, long_df):
 
@@ -1981,7 +2005,7 @@ class TestHistPlotBivariate:
             density, (x_edges, y_edges) = hist(sub_df["x"], sub_df["y"])
 
             scale = len(sub_df) / len(long_df)
-            assert_array_equal(mesh_data.data, (density * scale).T.flat)
+            assert_array_equal(mesh_data.data.flat, (density * scale).T.flat)
 
     def test_mesh_unique_norm(self, long_df):
 
@@ -2001,7 +2025,7 @@ class TestHistPlotBivariate:
             mesh_data = mesh.get_array()
 
             density, (x_edges, y_edges) = sub_hist(sub_df["x"], sub_df["y"])
-            assert_array_equal(mesh_data.data, density.T.flat)
+            assert_array_equal(mesh_data.data.flat, density.T.flat)
 
     @pytest.mark.parametrize("stat", ["probability", "proportion", "percent"])
     def test_mesh_normalization(self, long_df, stat):
@@ -2062,7 +2086,7 @@ class TestHistPlotBivariate:
         mesh = ax3.collections[0]
         assert mesh.get_clim() == (0, f(counts, pmax))
         assert_array_equal(
-            mesh.get_array().mask,
+            mesh.get_array().mask.flat,
             (counts <= f(counts, pthresh)).T.flat,
         )
 
@@ -2096,7 +2120,7 @@ class TestHistPlotBivariate:
         for i, mesh in enumerate(ax3.collections):
             assert mesh.get_clim() == (0, f(full_counts, pmax))
             assert_array_equal(
-                mesh.get_array().mask,
+                mesh.get_array().mask.flat,
                 (sub_counts[i] <= f(full_counts, pthresh)).T.flat,
             )
 
@@ -2104,7 +2128,7 @@ class TestHistPlotBivariate:
         for i, mesh in enumerate(ax4.collections):
             assert mesh.get_clim() == (0, f(sub_counts[i], pmax))
             assert_array_equal(
-                mesh.get_array().mask,
+                mesh.get_array().mask.flat,
                 (sub_counts[i] <= f(sub_counts[i], pthresh)).T.flat,
             )
 
@@ -2424,14 +2448,20 @@ class TestDisPlot:
         x, y = rng.normal(0, 1, (2, 100))
         z = [0] * 80 + [1] * 20
 
+        def count_contours(ax):
+            if _version_predates(mpl, "3.8.0rc1"):
+                return sum(bool(get_contour_coords(c)) for c in ax.collections)
+            else:
+                return sum(bool(p.vertices.size) for p in ax.collections[0].get_paths())
+
         g = displot(x=x, y=y, col=z, kind="kde", levels=10)
-        l1 = sum(bool(get_contour_coords(c)) for c in g.axes.flat[0].collections)
-        l2 = sum(bool(get_contour_coords(c)) for c in g.axes.flat[1].collections)
+        l1 = count_contours(g.axes.flat[0])
+        l2 = count_contours(g.axes.flat[1])
         assert l1 > l2
 
         g = displot(x=x, y=y, col=z, kind="kde", levels=10, common_norm=False)
-        l1 = sum(bool(get_contour_coords(c)) for c in g.axes.flat[0].collections)
-        l2 = sum(bool(get_contour_coords(c)) for c in g.axes.flat[1].collections)
+        l1 = count_contours(g.axes.flat[0])
+        l2 = count_contours(g.axes.flat[1])
         assert l1 == l2
 
     def test_bivariate_hist_norm(self, rng):
